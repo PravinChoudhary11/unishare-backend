@@ -27,5 +27,5 @@
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/yourusername/unishare-backend.git
+git clone https://github.com/PravinChoudhary11/unishare-backend.git
 cd unishare-backend
