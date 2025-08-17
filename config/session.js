@@ -20,7 +20,7 @@ module.exports = {
   cookie: {
     httpOnly: true,
     secure: process.env.NODE_ENV == 'production',      // true if using HTTPS
-    sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+    sameSite: "none",
     maxAge: 24 * 60 * 60 * 1000 // 1 day
   }
 };
