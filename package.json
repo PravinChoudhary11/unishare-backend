@@ -2,7 +2,7 @@
   "name": "unishare-backend",
   "version": "1.0.0",
   "scripts": {
-    "sumanth": "node ./index.js"
+    "start": "node ./index.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.55.0",
