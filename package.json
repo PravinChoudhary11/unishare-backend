@@ -5,14 +5,14 @@
     "sumanth": "node ./index.js"
   },
   "dependencies": {
-    "@prisma/client": "^6.14.0",
+    "@supabase/supabase-js": "^2.55.0",
     "bcryptjs": "^3.0.2",
     "connect-sqlite3": "^0.9.16",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^17.2.1",
     "ejs": "^3.1.10",
-    "express": "^4.18.2",   
+    "express": "^4.18.2",
     "express-session": "^1.18.2",
     "helmet": "^8.1.0",
     "morgan": "^1.10.1",
@@ -20,7 +20,6 @@
     "passport-google-oauth20": "^2.0.0"
   },
   "devDependencies": {
-    "nodemon": "^3.1.10",
-    "prisma": "^6.14.0"
+    "nodemon": "^3.1.10"
   }
 }

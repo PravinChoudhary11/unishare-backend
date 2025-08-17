@@ -1,3 +1,4 @@
+// config/session.js (unchanged - still using SQLite for sessions)
 const path = require('path');
 const session = require('express-session');
 const fs = require('fs');
