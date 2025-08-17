@@ -39,7 +39,7 @@ app.use(morgan(function (tokens, req, res) {
 }));
 
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  origin: process.env.FRONTEND_URL,
   credentials: true, // important to allow cookies
 }));
 
@@ -50,11 +50,6 @@ app.use(passport.session());
 
 // Routes
 app.use('/auth', authRoutes);
-
-app.get('/user/:username', (req, res) => {
-  const username = req.params.username;
-  res.json({ user: username });
-});
 
 app.get('/', (req, res) => {
   res.render('index', {
