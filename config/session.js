@@ -19,8 +19,9 @@ module.exports = {
   saveUninitialized: false,
   cookie: {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production', // only true in prod (HTTPS)
-    sameSite: process.env.NODE_ENV === 'production' ? "none" : "lax",
+    secure: process.env.NODE_ENV === "production", // true on Render
+    sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+    domain: process.env.NODE_ENV === "production" ? ".onrender.com" : "localhost",
     maxAge: 24 * 60 * 60 * 1000
   }
 };
