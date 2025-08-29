@@ -8,6 +8,7 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.55.0",
     "bcryptjs": "^3.0.2",
+    "connect-pg-simple": "^10.0.0",
     "connect-sqlite3": "^0.9.16",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",

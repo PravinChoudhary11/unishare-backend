@@ -1,5 +1,4 @@
 //index.js
-// Main server file for UniShare backend
 const dotenv = require('dotenv');
 dotenv.config();
 
@@ -18,8 +17,6 @@ const sessionConfig = require('./config/session');
 const authRoutes = require('./routes/auth');
 const roomRoutes = require('./routes/rooms'); // Add room routes
 const cors = require('cors');
-const sqlite3 = require("sqlite3").verbose();
-const dbPath = path.join(__dirname, "sessions", "sessions.sqlite");
 
 // Security and parsing middleware
 app.use(helmet());
@@ -83,40 +80,6 @@ app.get('/', (req, res) => {
     accessMessage: req.user ? 
       '✅ Welcome back!' : 
       '⚠️ ACCESS DENIED: Unauthorized users cannot access this site'
-  });
-});
-
-app.get("/debug/sessions", (req, res) => {
-  const db = new sqlite3.Database(dbPath, sqlite3.OPEN_READONLY, (err) => {
-    if (err) {
-      console.error("Error opening sessions DB:", err);
-      return res.status(500).json({ error: "Failed to open DB" });
-    }
-  });
-
-  db.all("SELECT * FROM sessions", [], (err, rows) => {
-    if (err) {
-      console.error("Error querying sessions:", err);
-      return res.status(500).json({ error: "Failed to fetch sessions" });
-    }
-
-    // decode session JSON
-    const sessions = rows.map((row) => {
-      let parsed;
-      try {
-        parsed = JSON.parse(row.sess);
-      } catch (e) {
-        parsed = row.sess;
-      }
-      return {
-        sid: row.sid,
-        expires: row.expiry,
-        data: parsed
-      };
-    });
-
-    res.json(sessions);
-    db.close();
   });
 });
 
