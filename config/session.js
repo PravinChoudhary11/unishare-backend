@@ -1,11 +1,10 @@
-// config/session.js - FIXED VERSION
+// config/session.js - VERCEL PRODUCTION FIX
 const session = require("express-session");
 
 const isProduction = process.env.NODE_ENV === "production";
 let sessionStore;
 
 if (isProduction && process.env.SUPABASE_DB_URL) {
-  // Production: Use PostgreSQL session store
   try {
     const pgSession = require("connect-pg-simple")(session);
     
@@ -14,44 +13,47 @@ if (isProduction && process.env.SUPABASE_DB_URL) {
       tableName: "session",
       createTableIfMissing: true,
       schemaName: "public",
-      pruneSessionInterval: 60, // Clean up expired sessions every 60 seconds
+      pruneSessionInterval: 60,
       errorLog: (err) => {
         console.error('Session store error:', err.message);
       }
     });
 
     console.log('🔧 Configured PostgreSQL session store for production');
-
   } catch (error) {
     console.error('❌ Failed to setup PostgreSQL session store:', error.message);
-    console.error('⚠️  Falling back to memory store (NOT RECOMMENDED for production)');
-    sessionStore = null; // Will use default memory store
+    sessionStore = null;
   }
 } else {
-  // Development: Use memory store with warning
   console.log('⚠️  Using memory session store (DEVELOPMENT ONLY)');
-  console.log('⚠️  For production, set NODE_ENV=production and provide SUPABASE_DB_URL');
 }
+
+// Check if frontend is on Vercel (cross-origin HTTPS)
+const frontendUrl = process.env.FRONTEND_URL || '';
+const isVercelFrontend = frontendUrl.includes('vercel.app') || frontendUrl.includes('https://');
+
+console.log('🔧 Session configuration:');
+console.log('- Environment:', isProduction ? 'production' : 'development');
+console.log('- Frontend URL:', frontendUrl);
+console.log('- Cross-origin HTTPS:', isVercelFrontend);
 
 module.exports = {
   store: sessionStore,
   secret: process.env.SESSION_SECRET || 'fallback-secret-key-change-in-production',
   resave: false,
-  saveUninitialized: true, // CHANGED: Need this for OAuth flow
+  saveUninitialized: false, // CHANGED: false to prevent session regeneration
   name: 'unishare.sid',
-  rolling: true,
+  rolling: false, // CHANGED: Disable rolling to prevent session ID changes
   cookie: {
     httpOnly: true,
-    secure: false, // CHANGED: Set to false for development
-    sameSite: 'lax', // CHANGED: Use 'lax' for development
-    maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    secure: isProduction && isVercelFrontend, // Secure only for HTTPS cross-origin
+    sameSite: isVercelFrontend ? 'none' : 'lax', // 'none' required for cross-origin HTTPS
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    domain: undefined // Let browser handle domain
   },
-  // Custom session ID generator
   genid: (req) => {
     const id = require('crypto').randomBytes(32).toString('hex');
-    if (!isProduction) {
-      console.log('🔑 Generated session ID:', id);
-    }
+    console.log('🔑 Generated session ID:', id);
     return id;
   }
 };
