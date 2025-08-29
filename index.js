@@ -1,4 +1,6 @@
 // Enhanced index.js - CORS fix for Vercel production
+require('dotenv').config(); // ← must be first
+const supabase = require('./config/supabase');
 
 const express = require('express');
 const cors = require('cors');
