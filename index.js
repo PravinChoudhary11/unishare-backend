@@ -39,7 +39,7 @@ app.use(morgan(function (tokens, req, res) {
   ].join(' ');
 }));
 
-// Updated CORS configuration in index.js
+// Updated CORS configuration
 const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:3001', // Add other local ports you might use
@@ -75,7 +75,6 @@ app.use(session(sessionConfig));
 app.use(passport.initialize());
 app.use(passport.session());
 
-// Add this debug middleware in index.js after session setup
 // Debug middleware - add this after passport session setup
 app.use((req, res, next) => {
   console.log('=== Session Debug ===');
@@ -87,31 +86,6 @@ app.use((req, res, next) => {
   console.log('Cookies:', req.headers.cookie);
   console.log('====================');
   next();
-});
-
-// Also update your /auth/me route to include more debugging
-// routes/auth.js - Update the /me route
-router.get('/me', (req, res) => {
-  console.log('=== /auth/me Debug ===');
-  console.log('Session ID:', req.sessionID);
-  console.log('Is authenticated:', req.isAuthenticated());
-  console.log('User:', req.user);
-  console.log('Session:', req.session);
-  console.log('=====================');
-
-  if (req.isAuthenticated()) {
-    res.json({ success: true, user: req.user });
-  } else {
-    res.status(401).json({ 
-      success: false, 
-      message: 'Not logged in',
-      debug: {
-        sessionExists: !!req.session,
-        sessionID: req.sessionID,
-        hasUser: !!req.user
-      }
-    });
-  }
 });
 
 // API Routes
