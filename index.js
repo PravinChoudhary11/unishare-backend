@@ -19,7 +19,6 @@ const authRoutes = require('./routes/auth');
 const roomRoutes = require('./routes/rooms'); // Add room routes
 const cors = require('cors');
 const sqlite3 = require("sqlite3").verbose();
-const path = require("path");
 const dbPath = path.join(__dirname, "sessions", "sessions.sqlite");
 
 // Security and parsing middleware
