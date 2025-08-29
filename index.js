@@ -38,25 +38,22 @@ app.use(morgan(function (tokens, req, res) {
   ].join(' ');
 }));
 
-// CORS configuration for both local dev and production
 const allowedOrigins = [
-  process.env.FRONTEND_URL,
   'http://localhost:3000',
-  'https://unishare.com'
-].filter(Boolean); // Remove any undefined values
+  'https://uniserver-4hkz.onrender.com', // your deployed backend
+  'https://unishare.com',                 // your real frontend domain (when live)
+  process.env.FRONTEND_URL
+].filter(Boolean);
 
 app.use(cors({
   origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) return callback(null, true);
-    
-    if (allowedOrigins.indexOf(origin) !== -1) {
+    if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
-      callback(new Error('Not allowed by CORS'));
+      callback(new Error(`Not allowed by CORS: ${origin}`));
     }
   },
-  credentials: true, // important to allow cookies
+  credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
