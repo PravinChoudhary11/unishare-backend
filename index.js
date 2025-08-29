@@ -25,7 +25,7 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
 
-// CORS Configuration for Vercel frontend
+// Enhanced CORS configuration for index.js
 const allowedOrigins = [
   'http://localhost:3000',
   'https://localhost:3000',
@@ -38,10 +38,9 @@ console.log('🔧 CORS Configuration:');
 console.log('- Environment:', isProduction ? 'production' : 'development');
 console.log('- Allowed origins:', allowedOrigins);
 
-// Enhanced CORS for production cross-origin requests
 app.use(cors({
   origin: function (origin, callback) {
-    // Allow requests with no origin in development
+    // Allow requests with no origin in development (mobile apps, Postman, etc.)
     if (!isProduction && !origin) {
       return callback(null, true);
     }
@@ -54,7 +53,7 @@ app.use(cors({
       callback(new Error('Not allowed by CORS'));
     }
   },
-  credentials: true, // CRITICAL for cross-origin cookies
+  credentials: true, // CRITICAL: Enable credentials (cookies)
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: [
     'Content-Type', 
@@ -62,12 +61,28 @@ app.use(cors({
     'x-requested-with',
     'Origin',
     'Accept',
-    'Cookie'
+    'Cookie',
+    'Set-Cookie'
   ],
-  exposedHeaders: ['Set-Cookie'],
-  optionsSuccessStatus: 200,
+  exposedHeaders: ['Set-Cookie'], // Allow frontend to see Set-Cookie header
+  optionsSuccessStatus: 200, // For legacy browser support
+  preflightContinue: false, // Pass control to the next handler
   maxAge: 86400 // Cache preflight for 1 day
 }));
+
+// Enhanced pre-flight handler
+app.options('*', (req, res) => {
+  console.log('🔄 OPTIONS preflight from:', req.get('Origin'));
+  console.log('🍪 Request credentials:', req.get('Cookie') ? 'present' : 'none');
+  
+  // Explicitly set CORS headers for preflight
+  res.header('Access-Control-Allow-Origin', req.get('Origin'));
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS,PATCH');
+  res.header('Access-Control-Allow-Headers', 'Content-Type,Authorization,x-requested-with,Origin,Accept,Cookie,Set-Cookie');
+  res.header('Access-Control-Expose-Headers', 'Set-Cookie');
+  res.sendStatus(200);
+});
 
 // Pre-flight request handler
 app.options('*', (req, res) => {
