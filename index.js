@@ -39,30 +39,80 @@ app.use(morgan(function (tokens, req, res) {
   ].join(' ');
 }));
 
+// Updated CORS configuration in index.js
 const allowedOrigins = [
   'http://localhost:3000',
-  'https://uniserver-4hkz.onrender.com', // your deployed backend
-  'https://unishare.com',                 // your real frontend domain (when live)
+  'http://localhost:3001', // Add other local ports you might use
+  'https://uniserver-4hkz.onrender.com',
+  'https://unishare.com',
   process.env.FRONTEND_URL
 ].filter(Boolean);
 
+// Enhanced CORS configuration
 app.use(cors({
   origin: function (origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
+    // Allow requests with no origin (mobile apps, curl requests, etc.)
+    if (!origin) return callback(null, true);
+    
+    // Check if origin is in allowed list
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
     } else {
-      callback(new Error(`Not allowed by CORS: ${origin}`));
+      console.log('CORS blocked origin:', origin); // Debug log
+      return callback(new Error(`Not allowed by CORS: ${origin}`));
     }
   },
-  credentials: true,
+  credentials: true, // This is crucial for sessions
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  // Add these for better session handling
+  optionsSuccessStatus: 200,
+  preflightContinue: false
 }));
 
 // Session & Passport (ORDER MATTERS!)
 app.use(session(sessionConfig));
 app.use(passport.initialize());
 app.use(passport.session());
+
+// Add this debug middleware in index.js after session setup
+// Debug middleware - add this after passport session setup
+app.use((req, res, next) => {
+  console.log('=== Session Debug ===');
+  console.log('Session ID:', req.sessionID);
+  console.log('Session exists:', !!req.session);
+  console.log('Is authenticated:', req.isAuthenticated ? req.isAuthenticated() : 'N/A');
+  console.log('User in session:', req.user ? req.user.id : 'None');
+  console.log('Origin:', req.get('origin'));
+  console.log('Cookies:', req.headers.cookie);
+  console.log('====================');
+  next();
+});
+
+// Also update your /auth/me route to include more debugging
+// routes/auth.js - Update the /me route
+router.get('/me', (req, res) => {
+  console.log('=== /auth/me Debug ===');
+  console.log('Session ID:', req.sessionID);
+  console.log('Is authenticated:', req.isAuthenticated());
+  console.log('User:', req.user);
+  console.log('Session:', req.session);
+  console.log('=====================');
+
+  if (req.isAuthenticated()) {
+    res.json({ success: true, user: req.user });
+  } else {
+    res.status(401).json({ 
+      success: false, 
+      message: 'Not logged in',
+      debug: {
+        sessionExists: !!req.session,
+        sessionID: req.sessionID,
+        hasUser: !!req.user
+      }
+    });
+  }
+});
 
 // API Routes
 app.use('/auth', authRoutes);
