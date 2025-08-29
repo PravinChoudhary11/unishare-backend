@@ -1,0 +1,32 @@
+# render.yaml - Render deployment configuration
+# Place this file in your project root
+
+services:
+  - type: web
+    name: unishare-backend
+    env: node
+    region: oregon # Choose your preferred region
+    plan: starter # or individual/team based on your needs
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    
+    # Environment variables (set these in Render dashboard instead)
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SESSION_SECRET
+        generateValue: true # Render will generate a secure random value
+        
+    # Auto-deploy settings
+    autoDeploy: true
+    
+    # Custom domains (optional)
+    # domains:
+    #   - your-custom-domain.com
+    
+    # Disk storage for uploads (if needed)
+    disk:
+      name: uploads
+      mountPath: /app/uploads
+      sizeGB: 1

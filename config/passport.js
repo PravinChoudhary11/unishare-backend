@@ -1,4 +1,4 @@
-// config/passport.js
+// config/passport.js - FIXED VERSION with better error handling
 const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
 const supabase = require('./supabase');
@@ -11,90 +11,124 @@ passport.use(
   },
   async (accessToken, refreshToken, profile, done) => {
     try {
-      // console.log('Google profile:', profile); // Debug log
+      console.log('🔐 Google OAuth callback received for:', profile.displayName);
+      console.log('Profile ID:', profile.id);
       
       // Check if user exists
       const { data: existingUser, error: findError } = await supabase
         .from('users')
         .select('*')
         .eq('google_id', profile.id)
-        .single();
+        .maybeSingle(); // Use maybeSingle instead of single to avoid errors
       
-      if (findError && findError.code !== 'PGRST116') { // PGRST116 = no rows found
-        throw findError;
+      if (findError) {
+        console.error('❌ Error finding user:', findError);
+        return done(findError, null);
       }
       
       let user;
       
       if (!existingUser) {
-        // Generate a simple ID (you can use uuid if preferred)
+        // Generate unique user ID
         const userId = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         
-        // Create new user
+        console.log('👤 Creating new user:', userId);
+        
+        const userData = {
+          id: userId,
+          google_id: profile.id,
+          email: profile.emails?.[0]?.value,
+          name: profile.displayName,
+          picture: profile.photos?.[0]?.value,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          last_login: new Date().toISOString()
+        };
+        
         const { data: newUser, error: createError } = await supabase
           .from('users')
-          .insert({
-            id: userId,
-            google_id: profile.id,
-            email: profile.emails[0].value,
-            name: profile.displayName,
-            picture: profile.photos[0].value,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-            last_login: new Date().toISOString()
-          })
+          .insert(userData)
           .select()
           .single();
         
-        if (createError) throw createError;
+        if (createError) {
+          console.error('❌ Error creating user:', createError);
+          return done(createError, null);
+        }
         
         user = newUser;
-        // console.log('Created new user:', user.id);
+        console.log('✅ Created new user successfully:', user.id);
       } else {
-        // Update last login and updated_at
+        console.log('👤 Found existing user:', existingUser.id);
+        
+        // Update last login
         const { data: updatedUser, error: updateError } = await supabase
           .from('users')
           .update({ 
             last_login: new Date().toISOString(),
-            updated_at: new Date().toISOString()
+            updated_at: new Date().toISOString(),
+            // Update profile info in case it changed
+            name: profile.displayName,
+            picture: profile.photos?.[0]?.value
           })
           .eq('id', existingUser.id)
           .select()
           .single();
         
-        if (updateError) throw updateError;
+        if (updateError) {
+          console.error('❌ Error updating user:', updateError);
+          // Still return existing user if update fails
+          user = existingUser;
+        } else {
+          user = updatedUser;
+        }
         
-        user = updatedUser;
-        // console.log('Updated existing user:', user.id);
+        console.log('✅ User login updated successfully:', user.id);
       }
       
+      console.log('🔑 Passport strategy returning user:', user.id);
       return done(null, user);
+      
     } catch (err) {
-      // console.error('Passport strategy error:', err);
+      console.error('❌ Passport strategy error:', err);
       return done(err, null);
     }
   })
 );
 
 passport.serializeUser((user, done) => {
-  // console.log('Serializing user:', user.id);
+  console.log('📦 Serializing user to session:', user.id);
+  // Only store the user ID in the session
   done(null, user.id);
 });
 
 passport.deserializeUser(async (id, done) => {
   try {
+    console.log('📦 Deserializing user from session:', id);
+    
     const { data: user, error } = await supabase
       .from('users')
       .select('*')
       .eq('id', id)
-      .single();
+      .maybeSingle();
     
-    if (error) throw error;
+    if (error) {
+      console.error('❌ Error deserializing user:', error);
+      return done(error, null);
+    }
     
-    // console.log('Deserializing user:', id);
+    if (!user) {
+      console.error('❌ User not found during deserialization:', id);
+      return done(null, false);
+    }
+    
+    console.log('✅ Successfully deserialized user:', user.id);
     done(null, user);
+    
   } catch (err) {
-    // console.error('Deserialize error:', err);
+    console.error('❌ Deserialize error:', err);
     done(err, null);
   }
 });
+
+module.exports = passport;
