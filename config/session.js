@@ -19,8 +19,8 @@ module.exports = {
   saveUninitialized: false,
   cookie: {
     httpOnly: true,
-    secure: process.env.NODE_ENV == 'production',      // true if using HTTPS
-    sameSite: "none",
-    maxAge: 24 * 60 * 60 * 1000 // 1 day
+    secure: process.env.NODE_ENV === 'production', // only true in prod (HTTPS)
+    sameSite: process.env.NODE_ENV === 'production' ? "none" : "lax",
+    maxAge: 24 * 60 * 60 * 1000
   }
 };

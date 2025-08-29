@@ -1,4 +1,3 @@
-//index.js
 const dotenv = require('dotenv');
 dotenv.config();
 
@@ -15,12 +14,13 @@ const helmet = require('helmet');
 const path = require('path');
 const sessionConfig = require('./config/session');
 const authRoutes = require('./routes/auth');
+const roomRoutes = require('./routes/rooms'); // Add room routes
 const cors = require('cors');
 
 // Security and parsing middleware
 app.use(helmet());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '10mb' })); // Increase limit for base64 images
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Template engine setup
 app.engine('ejs', ejs.renderFile);
@@ -38,9 +38,27 @@ app.use(morgan(function (tokens, req, res) {
   ].join(' ');
 }));
 
+// CORS configuration for both local dev and production
+const allowedOrigins = [
+  process.env.FRONTEND_URL,
+  'http://localhost:3000',
+  'https://unishare.com'
+].filter(Boolean); // Remove any undefined values
+
 app.use(cors({
-  origin: process.env.FRONTEND_URL,
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true, // important to allow cookies
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
 
 // Session & Passport (ORDER MATTERS!)
@@ -48,9 +66,14 @@ app.use(session(sessionConfig));
 app.use(passport.initialize());
 app.use(passport.session());
 
-// Routes
+// API Routes
 app.use('/auth', authRoutes);
+app.use('/api/rooms', roomRoutes); // Add room API routes
 
+// Serve static files (if needed for uploaded photos fallback)
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// Main page route
 app.get('/', (req, res) => {
   res.render('index', {
     title: 'UniShare',
@@ -62,13 +85,65 @@ app.get('/', (req, res) => {
   });
 });
 
-// Error handling middleware
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'OK',
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development'
+  });
+});
+
+// API info endpoint
+app.get('/api', (req, res) => {
+  res.json({
+    message: 'UniShare API',
+    version: '1.0.0',
+    endpoints: {
+      rooms: {
+        'POST /api/rooms': 'Create a new room posting',
+        'GET /api/rooms': 'Get all room postings (paginated)',
+        'GET /api/rooms/:id': 'Get a specific room by ID'
+      },
+      auth: {
+        'GET /auth/google': 'Start Google OAuth flow',
+        'GET /auth/google/callback': 'Google OAuth callback',
+        'GET /auth/logout': 'Logout user'
+      }
+    }
+  });
+});
+
+// 404 handler for API routes
+app.use('/api/*', (req, res) => {
+  res.status(404).json({
+    error: 'API endpoint not found',
+    path: req.path,
+    method: req.method
+  });
+});
+
+// Global error handling middleware
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err);
-  res.status(500).json({ error: 'Internal server error' });
+  
+  // CORS error
+  if (err.message === 'Not allowed by CORS') {
+    return res.status(403).json({
+      error: 'CORS policy violation',
+      details: 'Origin not allowed'
+    });
+  }
+  
+  // Default error response
+  res.status(500).json({ 
+    error: 'Internal server error',
+    details: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong'
+  });
 });
 
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
-  console.log("Server is Running on:", process.env.BACKEND_URL || `http://localhost:${PORT}`);
+  console.log("🚀 Server is Running on:", process.env.BACKEND_URL || `http://localhost:${PORT}`);
+  console.log("📊 Environment:", process.env.NODE_ENV || 'development');
 });
