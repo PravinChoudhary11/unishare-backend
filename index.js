@@ -1,5 +1,5 @@
-// Enhanced index.js - CORS fix for Vercel production
-require('dotenv').config(); // ← must be first
+// Enhanced index.js - CORS fix for Vercel production + Secure Image Upload
+require('dotenv').config(); // must be first
 const supabase = require('./config/supabase');
 
 const express = require('express');
@@ -8,14 +8,18 @@ const session = require('express-session');
 const helmet = require('helmet');
 const sessionConfig = require('./config/session');
 const passport = require('./config/passport');
+
+// Route imports
 const authRoutes = require('./routes/auth');
 const roomRoutes = require('./routes/rooms');
+const itemSellRoutes = require('./routes/itemsell');
+const uploadRoutes = require('./routes/upload'); // NEW: Secure upload routes
 
 const app = express();
 const PORT = process.env.PORT || 4000;
 const isProduction = process.env.NODE_ENV === 'production';
 
-// Trust proxy for Render deployment
+// Trust proxy for deployment
 app.set('trust proxy', 1);
 
 // Security middleware - relaxed for cross-origin
@@ -25,7 +29,7 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
 
-// Enhanced CORS configuration for index.js
+// Enhanced CORS configuration
 const allowedOrigins = [
   'http://localhost:3000',
   'https://localhost:3000',
@@ -34,7 +38,7 @@ const allowedOrigins = [
   process.env.FRONTEND_URL_PROD
 ].filter(Boolean);
 
-console.log('🔧 CORS Configuration:');
+console.log('CORS Configuration:');
 console.log('- Environment:', isProduction ? 'production' : 'development');
 console.log('- Allowed origins:', allowedOrigins);
 
@@ -46,10 +50,10 @@ app.use(cors({
     }
     
     if (!origin || allowedOrigins.includes(origin)) {
-      console.log('✅ CORS allowed for origin:', origin || 'no-origin');
+      console.log('CORS allowed for origin:', origin || 'no-origin');
       callback(null, true);
     } else {
-      console.warn('❌ CORS blocked origin:', origin);
+      console.warn('CORS blocked origin:', origin);
       callback(new Error('Not allowed by CORS'));
     }
   },
@@ -72,8 +76,8 @@ app.use(cors({
 
 // Enhanced pre-flight handler
 app.options('*', (req, res) => {
-  console.log('🔄 OPTIONS preflight from:', req.get('Origin'));
-  console.log('🍪 Request credentials:', req.get('Cookie') ? 'present' : 'none');
+  console.log('OPTIONS preflight from:', req.get('Origin'));
+  console.log('Request credentials:', req.get('Cookie') ? 'present' : 'none');
   
   // Explicitly set CORS headers for preflight
   res.header('Access-Control-Allow-Origin', req.get('Origin'));
@@ -84,14 +88,7 @@ app.options('*', (req, res) => {
   res.sendStatus(200);
 });
 
-// Pre-flight request handler
-app.options('*', (req, res) => {
-  console.log('🔄 OPTIONS preflight from:', req.get('Origin'));
-  res.header('Access-Control-Allow-Credentials', 'true');
-  res.sendStatus(200);
-});
-
-// Body parsing
+// Body parsing - IMPORTANT: Order matters for multipart handling
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
@@ -100,7 +97,7 @@ app.use(session(sessionConfig));
 
 // Enhanced session debugging
 app.use((req, res, next) => {
-  const isAuthRoute = req.path.startsWith('/auth');
+  const isAuthRoute = req.path.startsWith('/auth') || req.path.startsWith('/itemsell') || req.path.startsWith('/upload');
   
   if (isAuthRoute || !isProduction) {
     console.log('=== Session Debug ===');
@@ -108,10 +105,8 @@ app.use((req, res, next) => {
     console.log('Session exists:', !!req.session);
     console.log('Is authenticated:', req.isAuthenticated ? req.isAuthenticated() : 'N/A');
     console.log('User in session:', req.user?.id || 'None');
+    console.log('Route:', req.method, req.path);
     console.log('Origin:', req.get('Origin'));
-    console.log('User-Agent:', req.get('User-Agent')?.substring(0, 50) + '...');
-    console.log('Cookies:', req.get('Cookie'));
-    console.log('Referer:', req.get('Referer'));
     console.log('====================');
   }
   next();
@@ -131,16 +126,51 @@ app.get('/', (req, res) => {
     authenticated: req.isAuthenticated ? req.isAuthenticated() : false,
     user: req.user ? req.user.id : null,
     sessionID: req.sessionID,
-    origin: req.get('Origin')
+    origin: req.get('Origin'),
+    features: {
+      authentication: 'Google OAuth',
+      imageUpload: 'Secure backend upload to Supabase',
+      roomListings: 'CRUD operations',
+      itemMarketplace: 'CRUD operations'
+    },
+    routes: [
+      'GET /',
+      // Auth routes
+      'POST /auth/google',
+      'GET /auth/google/callback',
+      'GET /auth/me',
+      'GET /auth/logout',
+      'GET /auth/health',
+      // Room routes
+      'GET /api/rooms',
+      'POST /api/rooms',
+      'GET /api/rooms/my-rooms',
+      'GET /api/rooms/:id',
+      'PUT /api/rooms/:id',
+      'DELETE /api/rooms/:id',
+      // Item marketplace routes
+      'GET /itemsell',
+      'POST /itemsell',
+      'GET /itemsell/mine',
+      'GET /itemsell/:id',
+      'PUT /itemsell/:id',
+      'DELETE /itemsell/:id',
+      // Secure upload routes
+      'POST /upload/item-image',
+      'DELETE /upload/item-image'
+    ]
   });
 });
 
+// Mount routes
 app.use('/auth', authRoutes);
 app.use('/api/rooms', roomRoutes);
+app.use('/itemsell', itemSellRoutes);
+app.use('/upload', uploadRoutes); // NEW: Secure upload routes
 
 // Global error handler
 app.use((err, req, res, next) => {
-  console.error('❌ Global error:', err.message);
+  console.error('Global error:', err.message);
   
   if (err.message === 'Not allowed by CORS') {
     return res.status(403).json({
@@ -151,7 +181,25 @@ app.use((err, req, res, next) => {
     });
   }
   
+  // Handle multer errors globally
+  if (err.code === 'LIMIT_FILE_SIZE') {
+    return res.status(400).json({
+      success: false,
+      error: 'File too large',
+      message: 'Maximum file size is 5MB'
+    });
+  }
+  
+  if (err.code === 'LIMIT_UNEXPECTED_FILE') {
+    return res.status(400).json({
+      success: false,
+      error: 'Unexpected file',
+      message: 'Invalid file field'
+    });
+  }
+  
   res.status(err.status || 500).json({
+    success: false,
     error: err.message || 'Internal Server Error',
     ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
   });
@@ -162,12 +210,43 @@ app.use('*', (req, res) => {
   res.status(404).json({
     error: 'Route not found',
     path: req.originalUrl,
-    method: req.method
+    method: req.method,
+    availableRoutes: [
+      'GET /',
+      'POST /auth/google',
+      'GET /auth/google/callback',  
+      'GET /auth/me',
+      'GET /auth/logout',
+      'GET /api/rooms',
+      'POST /api/rooms',
+      'GET /api/rooms/my-rooms',
+      'GET /api/rooms/:id',
+      'PUT /api/rooms/:id',
+      'DELETE /api/rooms/:id',
+      'GET /itemsell',
+      'POST /itemsell',
+      'GET /itemsell/mine', 
+      'GET /itemsell/:id',
+      'PUT /itemsell/:id',
+      'DELETE /itemsell/:id',
+      'POST /upload/item-image',
+      'DELETE /upload/item-image'
+    ]
   });
 });
 
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on: http://localhost:${PORT}`);
-  console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`🌐 Frontend URL: ${process.env.FRONTEND_URL}`);
+  console.log(`Server running on: http://localhost:${PORT}`);
+  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`Frontend URL: ${process.env.FRONTEND_URL}`);
+  console.log('Available endpoints:');
+  console.log('   - Rooms: /api/rooms/*');
+  console.log('   - Auth: /auth/*');
+  console.log('   - Items: /itemsell/*');
+  console.log('   - Upload: /upload/* (NEW - Secure image uploads)');
+  console.log('Security Features:');
+  console.log('   ✅ Backend-only Supabase credentials');
+  console.log('   ✅ Secure image upload through backend');
+  console.log('   ✅ User ownership verification');
+  console.log('   ✅ File validation and cleanup');
 });
