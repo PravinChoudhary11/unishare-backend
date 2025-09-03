@@ -55,18 +55,9 @@ router.get(
 
 // Current logged-in user with enhanced debugging
 router.get('/me', async (req, res) => {
-  console.log('=== /auth/me Debug ===');
-  console.log('Session ID:', req.sessionID);
-  console.log('Is authenticated:', req.isAuthenticated());
-  console.log('User:', req.user?.id);
-  console.log('Session keys:', Object.keys(req.session));
-  console.log('Has passport session:', !!req.session.passport);
-  console.log('Passport user ID:', req.session.passport?.user);
-  console.log('=====================');
-
-  if (req.isAuthenticated() && req.user) {
-    res.json({ 
-      success: true, 
+  if (req.isAuthenticated && req.isAuthenticated() && req.user) {
+    return res.json({
+      success: true,
       user: {
         id: req.user.id,
         name: req.user.name,
@@ -74,20 +65,15 @@ router.get('/me', async (req, res) => {
         picture: req.user.picture
       }
     });
-  } else {
-    res.status(401).json({ 
-      success: false, 
-      message: 'Not logged in',
-      debug: {
-        sessionExists: !!req.session,
-        sessionID: req.sessionID,
-        hasUser: !!req.user,
-        isAuthenticated: req.isAuthenticated(),
-        sessionData: req.session
-      }
-    });
   }
+
+  // Strapi-style: no error, just null user
+  return res.json({
+    success: true,
+    user: null
+  });
 });
+
 
 // Enhanced logout
 router.get('/logout', (req, res, next) => {

@@ -30,12 +30,6 @@ if (isProduction && process.env.SUPABASE_DB_URL) {
 const frontendUrl = process.env.FRONTEND_URL || '';
 const isVercelFrontend = frontendUrl.includes('vercel.app') || frontendUrl.includes('https://');
 
-console.log('🔧 Session configuration:');
-console.log('- Environment:', isProduction ? 'production' : 'development');
-console.log('- Frontend URL:', frontendUrl);
-console.log('- Cross-origin HTTPS:', isVercelFrontend);
-console.log('- Secure cookies:', isProduction && isVercelFrontend);
-console.log('- SameSite:', isVercelFrontend ? 'none' : 'lax');
 
 module.exports = {
   store: sessionStore,
