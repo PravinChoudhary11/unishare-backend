@@ -211,6 +211,20 @@ router.get('/my', requireAuth, async (req, res) => {
   }
 });
 
+// GET /api/tickets/test - Test authentication
+router.get('/test', requireAuth, (req, res) => {
+  res.json({
+    success: true,
+    message: 'Authentication successful! You can now create tickets.',
+    user: {
+      id: req.userId,
+      name: req.user?.name,
+      email: req.user?.email
+    },
+    sessionID: req.sessionID
+  });
+});
+
 // POST /api/tickets/create - Create new ticket listing
 router.post('/create', requireAuth, upload.single('image'), async (req, res) => {
   try {
