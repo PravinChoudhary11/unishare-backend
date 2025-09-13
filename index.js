@@ -15,6 +15,7 @@ const authRoutes = require('./routes/auth');
 const roomRoutes = require('./routes/rooms');
 const itemSellRoutes = require('./routes/itemsell');
 const uploadRoutes = require('./routes/upload'); // NEW: Secure upload routes
+const ticketSellRoutes = require('./routes/ticketsell'); // NEW: Ticket selling routes
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -127,7 +128,8 @@ app.get('/', (req, res) => {
       authentication: 'Google OAuth',
       imageUpload: 'Secure backend upload to Supabase',
       roomListings: 'CRUD operations',
-      itemMarketplace: 'CRUD operations'
+      itemMarketplace: 'CRUD operations',
+      ticketSelling: 'Event, Travel & Other ticket sales'
     }
   });
 });
@@ -137,6 +139,7 @@ app.use('/auth', authRoutes);
 app.use('/api/rooms', roomRoutes);
 app.use('/itemsell', itemSellRoutes);
 app.use('/upload', uploadRoutes);
+app.use('/api/tickets', ticketSellRoutes);
 
 // Global error handler
 app.use((err, req, res, next) => {

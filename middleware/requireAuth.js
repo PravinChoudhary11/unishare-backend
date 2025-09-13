@@ -143,10 +143,16 @@ const requireRoomOwnership = () => requireOwnership('rooms', 'user_id', 'id');
  */
 const requireItemOwnership = () => requireOwnership('item_sell', 'user_id', 'id');
 
+/**
+ * Require ownership for tickets specifically  
+ */
+const requireTicketOwnership = () => requireOwnership('tickets', 'user_id', 'id');
+
 module.exports = {
   requireAuth,
   optionalAuth,
   requireOwnership,
   requireRoomOwnership,
-  requireItemOwnership
+  requireItemOwnership,
+  requireTicketOwnership
 };
