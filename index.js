@@ -9,6 +9,7 @@ const helmet = require('helmet');
 const sessionConfig = require('./config/session');
 const passport = require('./config/passport');
 const chalk = require('chalk');
+const engine = require('ejs-mate');
 
 // Route imports
 const authRoutes = require('./routes/auth');
@@ -25,6 +26,9 @@ const isProduction = process.env.NODE_ENV === 'production';
 
 // Trust proxy for deployment
 app.set('trust proxy', 1);
+app.engine('ejs', engine);
+app.set('views', __dirname + '/views');
+app.set('view engine', 'ejs'); // so you can render('index')
 
 // Security middleware
 app.use(helmet({
@@ -116,27 +120,14 @@ app.use(passport.initialize());
 app.use(passport.session());
 
 // Root route
-app.get('/', (req, res) => {
-  res.json({
-    message: 'Unishare Backend API',
-    status: 'running',
-    environment: process.env.NODE_ENV,
-    timestamp: new Date().toISOString(),
-    authenticated: req.isAuthenticated ? req.isAuthenticated() : false,
-    user: req.user ? req.user.id : null,
-    sessionID: req.sessionID,
-    origin: req.get('Origin'),
-    features: {
-      authentication: 'Google OAuth',
-      imageUpload: 'Secure backend upload to Supabase',
-      roomListings: 'CRUD operations',
-      itemMarketplace: 'CRUD operations',
-      ticketSelling: 'Event, Travel & Other ticket sales',
-      lostAndFound: 'Report and search lost/found items',
-      shareRide: 'Post rides and manage ride requests'
-    }
+app.get("/", (req, res) => {
+  res.render("index", { 
+    title: "UniShare Backend",
+    accessMessage: "You have restricted access to this server.",
+    userName: "Pravin" // replace dynamically if you have user data
   });
 });
+
 
 // Routes
 app.use('/auth', authRoutes);
