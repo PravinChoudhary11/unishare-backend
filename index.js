@@ -16,6 +16,8 @@ const roomRoutes = require('./routes/rooms');
 const itemSellRoutes = require('./routes/itemsell');
 const uploadRoutes = require('./routes/upload'); // NEW: Secure upload routes
 const ticketSellRoutes = require('./routes/ticketsell'); // NEW: Ticket selling routes
+const lostFoundRoutes = require('./routes/lostfound'); // NEW: Lost & Found routes
+const shareRideRoutes = require('./routes/shareride'); // NEW: Share Ride routes
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -129,7 +131,9 @@ app.get('/', (req, res) => {
       imageUpload: 'Secure backend upload to Supabase',
       roomListings: 'CRUD operations',
       itemMarketplace: 'CRUD operations',
-      ticketSelling: 'Event, Travel & Other ticket sales'
+      ticketSelling: 'Event, Travel & Other ticket sales',
+      lostAndFound: 'Report and search lost/found items',
+      shareRide: 'Post rides and manage ride requests'
     }
   });
 });
@@ -140,6 +144,8 @@ app.use('/api/rooms', roomRoutes);
 app.use('/itemsell', itemSellRoutes);
 app.use('/upload', uploadRoutes);
 app.use('/api/tickets', ticketSellRoutes);
+app.use('/api/lostfound', lostFoundRoutes);
+app.use('/api/shareride', shareRideRoutes);
 
 // Global error handler
 app.use((err, req, res, next) => {
