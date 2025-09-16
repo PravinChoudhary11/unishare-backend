@@ -143,7 +143,7 @@ app.use('/api/tickets', ticketSellRoutes);
 app.use('/api/lostfound', lostFoundRoutes); // NEW: Lost & Found routes
 app.use('/api/shareride', shareRideRoutes); // NEW: Share Ride routes
 app.use('/admin/announcements', announcementRoutes);
-app.use('/admin/notice', noticeRoutes); // NEW: Notice bar management routes
+app.use('/api/notice', noticeRoutes); // PUBLIC: Notice viewing + ADMIN: Notice management routes
 app.use('/admin/contacts', contactRoutes); // NEW: Contact directory management routes
 app.use('/admin/resources', resourceRoutes); // NEW: Resources directory management routes
 

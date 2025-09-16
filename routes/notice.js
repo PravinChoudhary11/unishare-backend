@@ -3,11 +3,50 @@ const express = require('express');
 const router = express.Router();
 const requireAdmin = require('../middleware/requireAdmin');
 
-// Apply admin middleware to all routes in this file
-router.use(requireAdmin);
-
-// Get all notices
+// Public route - Get active notices (no authentication required)
 router.get('/', async (req, res) => {
+  try {
+    console.log('📢 Public fetching active notices');
+
+    // Import supabase here to avoid circular dependencies
+    const supabase = require('../config/supabase');
+
+    const { data: notices, error } = await supabase
+      .from('notices')
+      .select('id, heading, body, priority, created_at')
+      .eq('active', true)
+      .order('priority', { ascending: false }) // Show high priority first
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('❌ Database error fetching public notices:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to fetch notices',
+        details: error.message
+      });
+    }
+
+    console.log(`✅ Public fetched ${notices?.length || 0} active notices`);
+    
+    res.json({
+      success: true,
+      notices: notices || [],
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('❌ Error in public notices route:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      details: error.message
+    });
+  }
+});
+
+// Admin route - Get all notices (including inactive)
+router.get('/admin', requireAdmin, async (req, res) => {
   try {
     console.log('📢 Admin fetching notices:', req.user.email);
 
@@ -52,8 +91,8 @@ router.get('/', async (req, res) => {
   }
 });
 
-// Create new notice
-router.post('/', async (req, res) => {
+// Admin route - Create new notice
+router.post('/admin', requireAdmin, async (req, res) => {
   try {
     const { heading, body, active = true, priority = 'normal' } = req.body;
 
@@ -117,8 +156,8 @@ router.post('/', async (req, res) => {
   }
 });
 
-// Update existing notice
-router.patch('/:id', async (req, res) => {
+// Admin route - Update existing notice
+router.patch('/admin/:id', requireAdmin, async (req, res) => {
   try {
     const noticeId = req.params.id;
     const { heading, body, active, priority } = req.body;
@@ -185,8 +224,8 @@ router.patch('/:id', async (req, res) => {
   }
 });
 
-// Delete notice
-router.delete('/:id', async (req, res) => {
+// Admin route - Delete notice
+router.delete('/admin/:id', requireAdmin, async (req, res) => {
   try {
     const noticeId = req.params.id;
 
@@ -242,46 +281,6 @@ router.delete('/:id', async (req, res) => {
   }
 });
 
-// Get active notices for public display (no admin auth required)
-router.get('/public', async (req, res) => {
-  try {
-    console.log('📢 Public fetching active notices');
 
-    // Import supabase here to avoid circular dependencies
-    const supabase = require('../config/supabase');
-
-    const { data: notices, error } = await supabase
-      .from('notices')
-      .select('id, heading, body, priority, created_at')
-      .eq('active', true)
-      .order('priority', { ascending: false }) // Show high priority first
-      .order('created_at', { ascending: false });
-
-    if (error) {
-      console.error('❌ Database error fetching public notices:', error);
-      return res.status(500).json({
-        success: false,
-        message: 'Failed to fetch notices',
-        details: error.message
-      });
-    }
-
-    console.log(`✅ Public fetched ${notices?.length || 0} active notices`);
-    
-    res.json({
-      success: true,
-      notices: notices || [],
-      timestamp: new Date().toISOString()
-    });
-
-  } catch (error) {
-    console.error('❌ Error in public notices route:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error',
-      details: error.message
-    });
-  }
-});
 
 module.exports = router;
