@@ -12,13 +12,18 @@ const chalk = require('chalk');
 const engine = require('ejs-mate');
 
 // Route imports
-const authRoutes = require('./routes/auth');
+const authRoutes = require('./routes/auth'); // Updated: separated auth routes (authentication only)
+const adminRoutes = require('./routes/admin'); // NEW: Admin-only routes (users, analytics, reports, activity)
 const roomRoutes = require('./routes/rooms');
 const itemSellRoutes = require('./routes/itemsell');
 const uploadRoutes = require('./routes/upload'); // NEW: Secure upload routes
 const ticketSellRoutes = require('./routes/ticketsell'); // NEW: Ticket selling routes
 const lostFoundRoutes = require('./routes/lostfound'); // NEW: Lost & Found routes
 const shareRideRoutes = require('./routes/shareride'); // NEW: Share Ride routes
+const announcementRoutes = require('./routes/announcements');
+const noticeRoutes = require('./routes/notice'); // NEW: Notice bar management routes
+const contactRoutes = require('./routes/contacts'); // NEW: Contact directory management routes
+const resourceRoutes = require('./routes/resources'); // NEW: Resources directory management routes
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -40,7 +45,6 @@ app.use(helmet({
 // CORS configuration
 const allowedOrigins = [
   'http://localhost:3000',
-  'https://localhost:3000',
   'https://unishare-eight.vercel.app', // Your Vercel domain
   process.env.FRONTEND_URL,
   process.env.FRONTEND_URL_PROD
@@ -130,13 +134,21 @@ app.get("/", (req, res) => {
 
 
 // Routes
-app.use('/auth', authRoutes);
+app.use('/auth', authRoutes); // Authentication routes only
+app.use('/admin', adminRoutes); // Admin-only routes (users, analytics, reports, activity)
 app.use('/api/rooms', roomRoutes);
 app.use('/itemsell', itemSellRoutes);
 app.use('/upload', uploadRoutes);
 app.use('/api/tickets', ticketSellRoutes);
-app.use('/api/lostfound', lostFoundRoutes);
-app.use('/api/shareride', shareRideRoutes);
+app.use('/api/lostfound', lostFoundRoutes); // NEW: Lost & Found routes
+app.use('/api/shareride', shareRideRoutes); // NEW: Share Ride routes
+app.use('/admin/announcements', announcementRoutes);
+app.use('/admin/notice', noticeRoutes); // NEW: Notice bar management routes
+app.use('/admin/contacts', contactRoutes); // NEW: Contact directory management routes
+app.use('/admin/resources', resourceRoutes); // NEW: Resources directory management routes
+
+// Public folder for serving static files (like uploaded images)
+app.use(express.static('public'));
 
 // Global error handler
 app.use((err, req, res, next) => {

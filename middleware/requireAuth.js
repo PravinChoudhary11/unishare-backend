@@ -134,6 +134,99 @@ const requireOwnership = (table = 'rooms', userIdField = 'user_id', resourceIdFi
 };
 
 /**
+ * Check if user owns a resource OR is an admin (admins can modify any resource)
+ * @param {string} table - Database table name ('rooms', 'item_sell', etc.)
+ * @param {string} userIdField - Field name that contains user ID (default: 'user_id')
+ * @param {string} resourceIdField - Request parameter containing resource ID (default: 'id')
+ */
+const requireOwnershipOrAdmin = (table = 'rooms', userIdField = 'user_id', resourceIdField = 'id') => {
+  return async (req, res, next) => {
+    try {
+      const resourceId = req.params[resourceIdField];
+      const userId = req.user?.id;
+
+      if (!userId) {
+        console.log('❌ Ownership/Admin check failed - no user ID');
+        return res.status(401).json({ 
+          success: false,
+          error: 'Authentication required',
+          message: 'Please log in to access this resource'
+        });
+      }
+
+      if (!resourceId) {
+        console.log('❌ Ownership/Admin check failed - no resource ID');
+        return res.status(400).json({ 
+          success: false,
+          error: 'Missing resource ID' 
+        });
+      }
+
+      // Check if user is admin first
+      const { ADMIN_EMAILS } = require('../config/admin');
+      const isAdmin = req.user?.email && ADMIN_EMAILS.includes(req.user.email);
+
+      if (isAdmin) {
+        console.log(`👑 Admin access granted for ${table}:${resourceId} by admin:${req.user.email}`);
+        req.isAdminAccess = true;
+        return next();
+      }
+
+      console.log(`🔐 Ownership check for ${table}:${resourceId} by user:${userId}`);
+
+      // Fetch the resource to check ownership (non-admin users)
+      const { data: resource, error } = await supabase
+        .from(table)
+        .select(userIdField)
+        .eq('id', resourceId)
+        .single();
+
+      if (error) {
+        console.error('❌ Error checking ownership:', error);
+        if (error.code === 'PGRST116') { // No rows returned
+          return res.status(404).json({ 
+            success: false,
+            error: 'Resource not found' 
+          });
+        }
+        return res.status(500).json({ 
+          success: false,
+          error: 'Database error during ownership check' 
+        });
+      }
+
+      if (!resource) {
+        console.log('❌ Resource not found:', resourceId);
+        return res.status(404).json({ 
+          success: false,
+          error: 'Resource not found' 
+        });
+      }
+
+      if (resource[userIdField] !== userId) {
+        console.log(`❌ Access denied - resource owner: ${resource[userIdField]} vs user: ${userId} (not admin)`);
+        return res.status(403).json({ 
+          success: false,
+          error: 'Access denied',
+          message: 'You can only modify your own listings'
+        });
+      }
+
+      console.log(`✅ Ownership verified for user: ${userId}`);
+      req.isAdminAccess = false;
+      next();
+    } catch (err) {
+      console.error('❌ Ownership/Admin check error:', err);
+      res.status(500).json({ 
+        success: false,
+        error: 'Server error during authorization check',
+        details: err.message
+      });
+    }
+  };
+};
+
+/**
  * Require ownership for rooms specifically
  */
 const requireRoomOwnership = () => requireOwnership('rooms', 'user_id', 'id');
@@ -148,11 +241,42 @@ const requireItemOwnership = () => requireOwnership('item_sell', 'user_id', 'id'
  */
 const requireTicketOwnership = () => requireOwnership('tickets', 'user_id', 'id');
 
+/**
+ * Require ownership OR admin access for rooms specifically
+ */
+const requireRoomOwnershipOrAdmin = () => requireOwnershipOrAdmin('rooms', 'user_id', 'id');
+
+/**
+ * Require ownership OR admin access for items specifically  
+ */
+const requireItemOwnershipOrAdmin = () => requireOwnershipOrAdmin('item_sell', 'user_id', 'id');
+
+/**
+ * Require ownership OR admin access for tickets specifically  
+ */
+const requireTicketOwnershipOrAdmin = () => requireOwnershipOrAdmin('tickets', 'user_id', 'id');
+
+/**
+ * Require ownership OR admin access for lost/found items specifically  
+ */
+const requireLostFoundOwnershipOrAdmin = () => requireOwnershipOrAdmin('lost_found_items', 'user_id', 'id');
+
+/**
+ * Require ownership OR admin access for shareride items specifically  
+ */
+const requireShareRideOwnershipOrAdmin = () => requireOwnershipOrAdmin('shareride', 'user_id', 'id');
+
 module.exports = {
   requireAuth,
   optionalAuth,
   requireOwnership,
+  requireOwnershipOrAdmin,
   requireRoomOwnership,
   requireItemOwnership,
-  requireTicketOwnership
+  requireTicketOwnership,
+  requireRoomOwnershipOrAdmin,
+  requireItemOwnershipOrAdmin,
+  requireTicketOwnershipOrAdmin,
+  requireLostFoundOwnershipOrAdmin,
+  requireShareRideOwnershipOrAdmin
 };

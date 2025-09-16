@@ -2,7 +2,7 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const supabase = require('../config/supabase');
-const { requireAuth, optionalAuth, requireOwnership } = require('../middleware/requireAuth');
+const { requireAuth, optionalAuth, requireOwnership, requireLostFoundOwnershipOrAdmin } = require('../middleware/requireAuth');
 
 const router = express.Router();
 
@@ -467,7 +467,7 @@ router.get('/:id', optionalAuth, async (req, res) => {
 });
 
 // PUT /api/lostfound/:id - Update item status (mark as resolved, etc.)
-router.put('/:id', requireAuth, requireOwnership('lost_found_items'), async (req, res) => {
+router.put('/:id', requireAuth, requireLostFoundOwnershipOrAdmin(), async (req, res) => {
   try {
     const itemId = req.params.id;
     const userId = req.userId;
@@ -540,35 +540,34 @@ router.put('/:id', requireAuth, requireOwnership('lost_found_items'), async (req
   }
 });
 
-// DELETE /api/lostfound/:id - Delete item
-router.delete('/:id', requireAuth, requireOwnership('lost_found_items'), async (req, res) => {
+// DELETE /api/lostfound/:id - Delete item (Owner or Admin)
+router.delete('/:id', requireAuth, requireLostFoundOwnershipOrAdmin(), async (req, res) => {
   try {
     const itemId = req.params.id;
     const userId = req.userId;
     console.log('🗑️ Deleting item:', itemId, 'by user:', userId);
 
     // Get item details before deletion (for cleanup and response)
+    // Note: Ownership/admin access already verified by middleware
     const { data: existingItem, error: fetchError } = await supabase
       .from('lost_found_items')
       .select('item_name, image_urls')
       .eq('id', itemId)
-      .eq('user_id', userId)
       .single();
 
     if (fetchError || !existingItem) {
       console.error('❌ Error fetching item for deletion:', fetchError);
       return res.status(404).json({
         success: false,
-        message: 'Item not found or you do not have permission to delete it'
+        message: 'Item not found'
       });
     }
 
-    // Delete item from database (ownership already verified by middleware)
+    // Delete item from database (ownership/admin access already verified by middleware)
     const { error: deleteError } = await supabase
       .from('lost_found_items')
       .delete()
-      .eq('id', itemId)
-      .eq('user_id', userId);
+      .eq('id', itemId);
 
     if (deleteError) {
       console.error('❌ Database error deleting item:', deleteError);

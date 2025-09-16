@@ -3,7 +3,7 @@ const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 const supabase = require('../config/supabase');
-const { requireAuth, optionalAuth, requireItemOwnership } = require('../middleware/requireAuth');
+const { requireAuth, optionalAuth, requireItemOwnershipOrAdmin } = require('../middleware/requireAuth');
 const path = require('path');
 
 // Configure multer for handling form data with image
@@ -229,7 +229,7 @@ router.post('/', requireAuth, upload.single('image'), async (req, res) => {
 });
 
 // PUT /itemsell/:id - Update existing item with optional new image
-router.put('/:id', requireAuth, requireItemOwnership(), upload.single('image'), async (req, res) => {
+router.put('/:id', requireAuth, requireItemOwnershipOrAdmin(), upload.single('image'), async (req, res) => {
   try {
     const { id } = req.params;
     console.log('Updating item:', id, 'by user:', req.userId);
@@ -371,7 +371,7 @@ router.put('/:id', requireAuth, requireItemOwnership(), upload.single('image'), 
 });
 
 // DELETE /itemsell/:id - Delete item and associated image
-router.delete('/:id', requireAuth, requireItemOwnership(), async (req, res) => {
+router.delete('/:id', requireAuth, requireItemOwnershipOrAdmin(), async (req, res) => {
   try {
     const { id } = req.params;
     console.log('Deleting item:', id, 'by user:', req.userId);

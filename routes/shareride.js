@@ -1,6 +1,6 @@
 const express = require('express');
 const supabase = require('../config/supabase');
-const { requireAuth, optionalAuth, requireOwnership } = require('../middleware/requireAuth');
+const { requireAuth, optionalAuth, requireShareRideOwnershipOrAdmin } = require('../middleware/requireAuth');
 
 const router = express.Router();
 
@@ -723,7 +723,7 @@ router.put('/requests/:requestId/respond', requireAuth, async (req, res) => {
 });
 
 // PUT /api/shareride/:id - Update ride (for drivers to modify their posted rides)
-router.put('/:id', requireAuth, requireOwnership('shared_rides'), async (req, res) => {
+router.put('/:id', requireAuth, requireShareRideOwnershipOrAdmin(), async (req, res) => {
   try {
     const rideId = req.params.id;
     const userId = req.userId;
@@ -748,18 +748,18 @@ router.put('/:id', requireAuth, requireOwnership('shared_rides'), async (req, re
     }
 
     // Get current ride to check confirmed bookings
+    // Note: Ownership/admin access already verified by middleware
     const { data: currentRide, error: fetchError } = await supabase
       .from('shared_rides')
       .select('seats, available_seats')
       .eq('id', rideId)
-      .eq('user_id', userId)
       .single();
 
     if (fetchError || !currentRide) {
       console.error('❌ Error fetching ride for update:', fetchError);
       return res.status(404).json({
         success: false,
-        message: 'Ride not found or you do not have permission to edit it'
+        message: 'Ride not found'
       });
     }
 
@@ -790,12 +790,11 @@ router.put('/:id', requireAuth, requireOwnership('shared_rides'), async (req, re
       updated_at: new Date().toISOString()
     };
 
-    // Update in database (ownership already verified by middleware)
+    // Update in database (ownership/admin access already verified by middleware)
     const { data: updatedRide, error } = await supabase
       .from('shared_rides')
       .update(updateData)
       .eq('id', rideId)
-      .eq('user_id', userId)
       .select(`
         *,
         users:user_id (
@@ -833,25 +832,25 @@ router.put('/:id', requireAuth, requireOwnership('shared_rides'), async (req, re
 });
 
 // DELETE /api/shareride/:id - Cancel/delete ride
-router.delete('/:id', requireAuth, requireOwnership('shared_rides'), async (req, res) => {
+router.delete('/:id', requireAuth, requireShareRideOwnershipOrAdmin(), async (req, res) => {
   try {
     const rideId = req.params.id;
     const userId = req.userId;
     console.log('🗑️ Cancelling ride:', rideId, 'by user:', userId);
 
     // Get ride details before deletion
+    // Note: Ownership/admin access already verified by middleware
     const { data: existingRide, error: fetchError } = await supabase
       .from('shared_rides')
       .select('driver_name, from_location, to_location, date, time')
       .eq('id', rideId)
-      .eq('user_id', userId)
       .single();
 
     if (fetchError || !existingRide) {
       console.error('❌ Error fetching ride for deletion:', fetchError);
       return res.status(404).json({
         success: false,
-        message: 'Ride not found or you do not have permission to delete it'
+        message: 'Ride not found'
       });
     }
 
@@ -866,15 +865,14 @@ router.delete('/:id', requireAuth, requireOwnership('shared_rides'), async (req,
       .eq('ride_id', rideId)
       .in('status', ['pending', 'confirmed']);
 
-    // Update ride status to cancelled instead of deleting
+    // Update ride status to cancelled instead of deleting (admin/owner access already verified)
     const { error: updateError } = await supabase
       .from('shared_rides')
       .update({ 
         status: 'cancelled',
         updated_at: new Date().toISOString()
       })
-      .eq('id', rideId)
-      .eq('user_id', userId);
+      .eq('id', rideId);
 
     if (updateError) {
       console.error('❌ Database error cancelling ride:', updateError);

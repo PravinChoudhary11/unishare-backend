@@ -2,7 +2,7 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const supabase = require('../config/supabase');
-const { requireAuth, optionalAuth, requireOwnership } = require('../middleware/requireAuth');
+const { requireAuth, optionalAuth, requireTicketOwnershipOrAdmin } = require('../middleware/requireAuth');
 
 const router = express.Router();
 
@@ -369,7 +369,7 @@ router.post('/create', requireAuth, upload.single('image'), async (req, res) => 
 });
 
 // PUT /api/tickets/:id - Update ticket listing
-router.put('/:id', requireAuth, requireOwnership('tickets'), upload.single('image'), async (req, res) => {
+router.put('/:id', requireAuth, requireTicketOwnershipOrAdmin(), upload.single('image'), async (req, res) => {
   try {
     const ticketId = req.params.id;
     const userId = req.userId;
@@ -520,18 +520,18 @@ router.put('/:id', requireAuth, requireOwnership('tickets'), upload.single('imag
 });
 
 // DELETE /api/tickets/:id - Delete ticket listing
-router.delete('/:id', requireAuth, requireOwnership('tickets'), async (req, res) => {
+router.delete('/:id', requireAuth, requireTicketOwnershipOrAdmin(), async (req, res) => {
   try {
     const ticketId = req.params.id;
     const userId = req.userId;
     console.log('🗑️ Deleting ticket:', ticketId, 'by user:', userId);
 
     // Get ticket details before deletion (for cleanup and response)
+    // Note: Ownership/admin access already verified by middleware
     const { data: existingTicket, error: fetchError } = await supabase
       .from('tickets')
       .select('title, image_url')
       .eq('id', ticketId)
-      .eq('user_id', userId)
       .single();
 
     if (fetchError || !existingTicket) {
@@ -542,12 +542,11 @@ router.delete('/:id', requireAuth, requireOwnership('tickets'), async (req, res)
       });
     }
 
-    // Delete ticket from database (ownership already verified by middleware)
+    // Delete ticket from database (ownership/admin access already verified by middleware)
     const { error: deleteError } = await supabase
       .from('tickets')
       .delete()
-      .eq('id', ticketId)
-      .eq('user_id', userId);
+      .eq('id', ticketId);
 
     if (deleteError) {
       console.error('❌ Database error deleting ticket:', deleteError);

@@ -4,7 +4,7 @@ const router = express.Router();
 const multer = require('multer');
 const supabase = require('../config/supabase');
 const path = require('path');
-const { requireAuth, requireOwnership } = require('../middleware/auth');
+const { requireAuth, requireRoomOwnershipOrAdmin } = require('../middleware/requireAuth');
 
 // Multer setup
 const upload = multer({
@@ -211,7 +211,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // PUT update room - REQUIRES AUTHENTICATION + OWNERSHIP
-router.put('/:id', requireAuth, requireOwnership(), upload.array('photos', 10), validateRoomData, async (req, res) => {
+router.put('/:id', requireAuth, requireRoomOwnershipOrAdmin(), upload.array('photos', 10), validateRoomData, async (req, res) => {
   try {
     console.log('✏️ Updating room:', req.params.id, 'by user:', req.user.id);
 
@@ -230,7 +230,6 @@ router.put('/:id', requireAuth, requireOwnership(), upload.array('photos', 10), 
       .from('rooms')
       .update(roomData)
       .eq('id', req.params.id)
-      .eq('user_id', req.user.id) // Double-check ownership
       .select('*')
       .single();
 
@@ -249,24 +248,23 @@ router.put('/:id', requireAuth, requireOwnership(), upload.array('photos', 10), 
 });
 
 // DELETE room - REQUIRES AUTHENTICATION + OWNERSHIP
-router.delete('/:id', requireAuth, requireOwnership(), async (req, res) => {
+router.delete('/:id', requireAuth, requireRoomOwnershipOrAdmin(), async (req, res) => {
   try {
     console.log('🗑️ Deleting room:', req.params.id, 'by user:', req.user.id);
 
     // First get the room to access photos for cleanup
+    // Note: Ownership/admin access already verified by middleware
     const { data: room } = await supabase
       .from('rooms')
       .select('photos')
       .eq('id', req.params.id)
-      .eq('user_id', req.user.id)
       .single();
 
-    // Delete the room record
+    // Delete the room record (ownership/admin access already verified)
     const { error } = await supabase
       .from('rooms')
       .delete()
-      .eq('id', req.params.id)
-      .eq('user_id', req.user.id); // Double-check ownership
+      .eq('id', req.params.id);
 
     if (error) throw error;
 
