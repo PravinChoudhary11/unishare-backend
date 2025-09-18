@@ -117,6 +117,7 @@ app.use((req, res, next) => {
   res.on('finish', () => {
     const end = process.hrtime.bigint();
     const durationMs = Number(end - start) / 1e6;
+    
 
     let statusColor = chalk.green;
     if (res.statusCode >= 400 && res.statusCode < 500) statusColor = chalk.yellow;
