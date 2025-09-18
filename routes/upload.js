@@ -28,8 +28,6 @@ const upload = multer({
  */
 router.post('/item-image', requireAuth, upload.single('image'), async (req, res) => {
   try {
-    console.log('Uploading item image for user:', req.userId);
-
     if (!req.file) {
       return res.status(400).json({
         success: false,
@@ -45,8 +43,6 @@ router.post('/item-image', requireAuth, upload.single('image'), async (req, res)
     const randomString = Math.random().toString(36).substring(2, 8);
     const fileExt = path.extname(file.originalname).toLowerCase();
     const fileName = `items/${userId}/${timestamp}_${randomString}${fileExt}`;
-
-    console.log('Uploading to storage path:', fileName);
 
     // Upload to Supabase Storage
     const { data, error } = await supabase.storage
@@ -78,8 +74,6 @@ router.post('/item-image', requireAuth, upload.single('image'), async (req, res)
         message: 'Failed to generate image URL'
       });
     }
-
-    console.log('Image uploaded successfully:', urlData.publicUrl);
 
     res.json({
       success: true,
@@ -114,7 +108,7 @@ router.delete('/item-image', requireAuth, async (req, res) => {
       });
     }
 
-    console.log('Deleting image:', imagePath, 'for user:', req.userId);
+    // Extract storage path from full URL if needed
 
     // Extract path from URL if full URL is provided
     let storagePath = imagePath;
@@ -143,7 +137,6 @@ router.delete('/item-image', requireAuth, async (req, res) => {
       });
     }
 
-    console.log('Image deleted successfully:', storagePath);
     res.json({
       success: true,
       message: 'Image deleted successfully'

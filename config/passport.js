@@ -11,9 +11,6 @@ passport.use(
   },
   async (accessToken, refreshToken, profile, done) => {
     try {
-      console.log('🔐 Google OAuth callback received for:', profile.displayName);
-      console.log('Profile ID:', profile.id);
-      
       // Check if user exists
       const { data: existingUser, error: findError } = await supabase
         .from('users')
@@ -31,8 +28,6 @@ passport.use(
       if (!existingUser) {
         // Generate unique user ID
         const userId = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-        
-        console.log('👤 Creating new user:', userId);
         
         const userData = {
           id: userId,
@@ -57,10 +52,7 @@ passport.use(
         }
         
         user = newUser;
-        console.log('✅ Created new user successfully:', user.id);
       } else {
-        console.log('👤 Found existing user:', existingUser.id);
-        
         // Update last login
         const { data: updatedUser, error: updateError } = await supabase
           .from('users')
@@ -82,11 +74,8 @@ passport.use(
         } else {
           user = updatedUser;
         }
-        
-        console.log('✅ User login updated successfully:', user.id);
       }
       
-      console.log('🔑 Passport strategy returning user:', user.id);
       return done(null, user);
       
     } catch (err) {
@@ -97,15 +86,12 @@ passport.use(
 );
 
 passport.serializeUser((user, done) => {
-  console.log('📦 Serializing user to session:', user.id);
   // Only store the user ID in the session
   done(null, user.id);
 });
 
 passport.deserializeUser(async (id, done) => {
   try {
-    console.log('📦 Deserializing user from session:', id);
-    
     const { data: user, error } = await supabase
       .from('users')
       .select('*')
@@ -122,7 +108,6 @@ passport.deserializeUser(async (id, done) => {
       return done(null, false);
     }
     
-    console.log('✅ Successfully deserialized user:', user.id);
     done(null, user);
     
   } catch (err) {

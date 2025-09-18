@@ -11,19 +11,34 @@ const passport = require('./config/passport');
 const chalk = require('chalk');
 const engine = require('ejs-mate');
 
-// Route imports
-const authRoutes = require('./routes/auth'); // Updated: separated auth routes (authentication only)
-const adminRoutes = require('./routes/admin'); // NEW: Admin-only routes (users, analytics, reports, activity)
-const roomRoutes = require('./routes/rooms');
-const itemSellRoutes = require('./routes/itemsell');
-const uploadRoutes = require('./routes/upload'); // NEW: Secure upload routes
-const ticketSellRoutes = require('./routes/ticketsell'); // NEW: Ticket selling routes
-const lostFoundRoutes = require('./routes/lostfound'); // NEW: Lost & Found routes
-const shareRideRoutes = require('./routes/shareride'); // NEW: Share Ride routes
-const announcementRoutes = require('./routes/announcements');
-const noticeRoutes = require('./routes/notice'); // NEW: Notice bar management routes
-const contactRoutes = require('./routes/contacts'); // NEW: Contact directory management routes
-const resourceRoutes = require('./routes/resources'); // NEW: Resources directory management routes
+// Route imports - Core system routes
+const authRoutes = require('./routes/auth'); // Authentication routes (login, logout, register)
+const adminRoutes = require('./routes/admin'); // Admin dashboard routes
+const uploadRoutes = require('./routes/upload'); // File upload routes
+
+// API Routes - User-facing routes (from /routes/api/)
+const apiRoomRoutes = require('./routes/api/rooms');
+const apiItemSellRoutes = require('./routes/api/itemsell');
+const apiTicketSellRoutes = require('./routes/api/ticketsell');
+const apiLostFoundRoutes = require('./routes/api/lostfound');
+const apiShareRideRoutes = require('./routes/api/shareride');
+const apiAnnouncementRoutes = require('./routes/api/announcements');
+const apiNoticeRoutes = require('./routes/api/notice');
+const apiContactRoutes = require('./routes/api/contacts');
+const apiResourceRoutes = require('./routes/api/resources');
+const apiNotificationRoutes = require('./routes/api/notifications');
+
+// Admin Routes - Admin management routes (from /routes/admin/)
+const adminSharerideRoutes = require('./routes/admin/shareride');
+const adminTicketsellRoutes = require('./routes/admin/ticketsell');
+const adminItemsellRoutes = require('./routes/admin/itemsell');
+const adminRoomsRoutes = require('./routes/admin/rooms');
+const adminLostfoundRoutes = require('./routes/admin/lostfound');
+const adminAnnouncementRoutes = require('./routes/admin/announcements');
+const adminResourceRoutes = require('./routes/admin/resources');
+const adminContactRoutes = require('./routes/admin/contacts');
+const adminNoticeRoutes = require('./routes/admin/notice');
+const adminNotificationRoutes = require('./routes/admin/notifications');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -133,19 +148,39 @@ app.get("/", (req, res) => {
 });
 
 
-// Routes
-app.use('/auth', authRoutes); // Authentication routes only
-app.use('/admin', adminRoutes); // Admin-only routes (users, analytics, reports, activity)
-app.use('/api/rooms', roomRoutes);
-app.use('/itemsell', itemSellRoutes);
-app.use('/upload', uploadRoutes);
-app.use('/api/tickets', ticketSellRoutes);
-app.use('/api/lostfound', lostFoundRoutes); // NEW: Lost & Found routes
-app.use('/api/shareride', shareRideRoutes); // NEW: Share Ride routes
-app.use('/admin/announcements', announcementRoutes);
-app.use('/api/notice', noticeRoutes); // PUBLIC: Notice viewing + ADMIN: Notice management routes
-app.use('/admin/contacts', contactRoutes); // NEW: Contact directory management routes
-app.use('/admin/resources', resourceRoutes); // NEW: Resources directory management routes
+// Core System Routes
+app.use('/auth', authRoutes); // Authentication routes (login, logout, register)
+app.use('/admin', adminRoutes); // Admin dashboard routes
+app.use('/upload', uploadRoutes); // File upload routes
+
+// =========================
+// API Routes (User Access - Own Data Only + Public Read)
+// =========================
+app.use('/api/rooms', apiRoomRoutes);
+app.use('/api/itemsell', apiItemSellRoutes);
+app.use('/api/ticketsell', apiTicketSellRoutes);
+app.use('/api/lostfound', apiLostFoundRoutes);
+app.use('/api/shareride', apiShareRideRoutes);
+app.use('/api/notice', apiNoticeRoutes); // PUBLIC: Notice viewing only
+app.use('/api/announcements', apiAnnouncementRoutes); // PUBLIC: Announcements viewing  
+app.use('/api/resources', apiResourceRoutes); // PUBLIC: Resources viewing + suggestion system
+app.use('/api/contacts', apiContactRoutes); // PUBLIC: Contacts directory viewing
+app.use('/api/notifications', apiNotificationRoutes); // USER: Personal notifications management
+
+// =========================
+// Admin Routes (Admin Access - All Data with Full CRUD)
+// =========================
+
+app.use('/admin/shareride', adminSharerideRoutes);
+app.use('/admin/ticketsell', adminTicketsellRoutes); 
+app.use('/admin/itemsell', adminItemsellRoutes);
+app.use('/admin/rooms', adminRoomsRoutes);
+app.use('/admin/lostfound', adminLostfoundRoutes);
+app.use('/admin/announcements', adminAnnouncementRoutes);
+app.use('/admin/resources', adminResourceRoutes);
+app.use('/admin/contacts', adminContactRoutes);
+app.use('/admin/notice', adminNoticeRoutes);
+app.use('/admin/notifications', adminNotificationRoutes); // ADMIN: Notification management & broadcasting
 
 // Public folder for serving static files (like uploaded images)
 app.use(express.static('public'));

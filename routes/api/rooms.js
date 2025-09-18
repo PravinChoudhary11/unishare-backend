@@ -1,10 +1,10 @@
-// routes/rooms.js - Updated with authentication
+// routes/api/rooms.js - User rooms API (own data only)
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
-const supabase = require('../config/supabase');
+const supabase = require('../../config/supabase');
 const path = require('path');
-const { requireAuth, requireRoomOwnershipOrAdmin } = require('../middleware/requireAuth');
+const { requireAuth, requireRoomOwnershipOrAdmin } = require('../../middleware/requireAuth');
 
 // Multer setup
 const upload = multer({
@@ -62,7 +62,7 @@ const uploadPhotos = async (files) => {
   return urls;
 };
 
-// POST create room - REQUIRES AUTHENTICATION
+// POST /api/rooms - Create new room listing
 router.post('/', requireAuth, upload.array('photos', 10), validateRoomData, async (req, res) => {
   try {
     console.log('📝 Creating room for user:', req.user.id);
@@ -70,7 +70,7 @@ router.post('/', requireAuth, upload.array('photos', 10), validateRoomData, asyn
     const roomData = { 
       ...req.body, 
       photos: [],
-      user_id: req.user.id,  // Add user ownership
+      user_id: req.user.id,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
@@ -103,11 +103,11 @@ router.post('/', requireAuth, upload.array('photos', 10), validateRoomData, asyn
   }
 });
 
-// GET all rooms - PUBLIC (no auth required)
+// GET /api/rooms - Fetch all rooms (PUBLIC)
 router.get('/', async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
-    const limit = Math.min(parseInt(req.query.limit) || 10, 50); // Max 50 per page
+    const limit = Math.min(parseInt(req.query.limit) || 10, 50);
     const offset = (page - 1) * limit;
 
     console.log('📋 Fetching rooms - page:', page, 'limit:', limit);
@@ -165,8 +165,8 @@ router.get('/', async (req, res) => {
   }
 });
 
-// GET user's own rooms - REQUIRES AUTHENTICATION
-router.get('/my-rooms', requireAuth, async (req, res) => {
+// GET /api/rooms/mine - Fetch current user's rooms
+router.get('/mine', requireAuth, async (req, res) => {
   try {
     console.log('📋 Fetching rooms for user:', req.user.id);
 
@@ -186,7 +186,7 @@ router.get('/my-rooms', requireAuth, async (req, res) => {
   }
 });
 
-// GET room by ID - PUBLIC
+// GET /api/rooms/:id - Fetch single room by ID (PUBLIC)
 router.get('/:id', async (req, res) => {
   try {
     console.log('🔍 Fetching room:', req.params.id);
@@ -210,7 +210,7 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// PUT update room - REQUIRES AUTHENTICATION + OWNERSHIP
+// PUT /api/rooms/:id - Update room (requires ownership)
 router.put('/:id', requireAuth, requireRoomOwnershipOrAdmin(), upload.array('photos', 10), validateRoomData, async (req, res) => {
   try {
     console.log('✏️ Updating room:', req.params.id, 'by user:', req.user.id);
@@ -247,20 +247,19 @@ router.put('/:id', requireAuth, requireRoomOwnershipOrAdmin(), upload.array('pho
   }
 });
 
-// DELETE room - REQUIRES AUTHENTICATION + OWNERSHIP
+// DELETE /api/rooms/:id - Delete room (requires ownership)
 router.delete('/:id', requireAuth, requireRoomOwnershipOrAdmin(), async (req, res) => {
   try {
     console.log('🗑️ Deleting room:', req.params.id, 'by user:', req.user.id);
 
     // First get the room to access photos for cleanup
-    // Note: Ownership/admin access already verified by middleware
     const { data: room } = await supabase
       .from('rooms')
       .select('photos')
       .eq('id', req.params.id)
       .single();
 
-    // Delete the room record (ownership/admin access already verified)
+    // Delete the room record
     const { error } = await supabase
       .from('rooms')
       .delete()
@@ -268,7 +267,7 @@ router.delete('/:id', requireAuth, requireRoomOwnershipOrAdmin(), async (req, re
 
     if (error) throw error;
 
-    // Clean up photos from storage (optional - consider doing this in background)
+    // Clean up photos from storage
     if (room?.photos?.length) {
       console.log('🧹 Cleaning up', room.photos.length, 'photos');
       for (const photoUrl of room.photos) {

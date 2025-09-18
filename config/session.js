@@ -17,13 +17,10 @@ if (isProduction && process.env.SUPABASE_DB_URL) {
         console.error('Session store error:', err.message);
       }
     });
-    console.log('🔧 Configured PostgreSQL session store for production');
   } catch (error) {
     console.error('❌ Failed to setup PostgreSQL session store:', error.message);
     sessionStore = null;
   }
-} else {
-  console.log('⚠️  Using memory session store (DEVELOPMENT ONLY)');
 }
 
 // Check if frontend is on Vercel (cross-origin HTTPS)
@@ -46,8 +43,6 @@ module.exports = {
     domain: undefined // Let browser handle domain automatically
   },
   genid: (req) => {
-    const id = require('crypto').randomBytes(32).toString('hex');
-    console.log('🔑 Generated session ID:', id);
-    return id;
+    return require('crypto').randomBytes(32).toString('hex');
   }
 };

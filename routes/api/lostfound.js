@@ -1,8 +1,8 @@
 const express = require('express');
 const multer = require('multer');
 const path = require('path');
-const supabase = require('../config/supabase');
-const { requireAuth, optionalAuth, requireOwnership, requireLostFoundOwnershipOrAdmin } = require('../middleware/requireAuth');
+const supabase = require('../../config/supabase');
+const { requireAuth, optionalAuth, requireOwnership, requireLostFoundOwnershipOrAdmin } = require('../../middleware/requireAuth');
 
 const router = express.Router();
 

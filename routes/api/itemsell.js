@@ -1,9 +1,9 @@
-// routes/itemsell.js - Item Sell CRUD with Backend Image Upload
+// routes/api/itemsell.js - Item Sell CRUD with Backend Image Upload (User API)
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
-const supabase = require('../config/supabase');
-const { requireAuth, optionalAuth, requireItemOwnershipOrAdmin } = require('../middleware/requireAuth');
+const supabase = require('../../config/supabase');
+const { requireAuth, optionalAuth, requireItemOwnershipOrAdmin } = require('../../middleware/requireAuth');
 const path = require('path');
 
 // Configure multer for handling form data with image
@@ -105,7 +105,7 @@ const validateItemData = (data) => {
   return errors;
 };
 
-// POST /itemsell - Create new item listing with image
+// POST /api/itemsell - Create new item listing with image
 router.post('/', requireAuth, upload.single('image'), async (req, res) => {
   try {
     console.log('Creating new item listing for user:', req.userId);
@@ -228,7 +228,7 @@ router.post('/', requireAuth, upload.single('image'), async (req, res) => {
   }
 });
 
-// PUT /itemsell/:id - Update existing item with optional new image
+// PUT /api/itemsell/:id - Update existing item with optional new image
 router.put('/:id', requireAuth, requireItemOwnershipOrAdmin(), upload.single('image'), async (req, res) => {
   try {
     const { id } = req.params;
@@ -370,7 +370,7 @@ router.put('/:id', requireAuth, requireItemOwnershipOrAdmin(), upload.single('im
   }
 });
 
-// DELETE /itemsell/:id - Delete item and associated image
+// DELETE /api/itemsell/:id - Delete item and associated image
 router.delete('/:id', requireAuth, requireItemOwnershipOrAdmin(), async (req, res) => {
   try {
     const { id } = req.params;
@@ -435,7 +435,7 @@ router.delete('/:id', requireAuth, requireItemOwnershipOrAdmin(), async (req, re
   }
 });
 
-// GET /itemsell - Fetch all items (PUBLIC with optional auth)
+// GET /api/itemsell - Fetch all items (PUBLIC with optional auth)
 router.get('/', optionalAuth, async (req, res) => {
   try {
     console.log('Fetching marketplace items', req.userId ? `for user: ${req.userId}` : '(anonymous)');
@@ -536,7 +536,7 @@ router.get('/', optionalAuth, async (req, res) => {
   }
 });
 
-// GET /itemsell/mine - Fetch current user's items (REQUIRES AUTH)
+// GET /api/itemsell/mine - Fetch current user's items (REQUIRES AUTH)
 router.get('/mine', requireAuth, async (req, res) => {
   try {
     console.log('Fetching items for user:', req.userId);
@@ -579,7 +579,7 @@ router.get('/mine', requireAuth, async (req, res) => {
   }
 });
 
-// GET /itemsell/:id - Fetch single item by ID (PUBLIC)
+// GET /api/itemsell/:id - Fetch single item by ID (PUBLIC)
 router.get('/:id', optionalAuth, async (req, res) => {
   try {
     const { id } = req.params;

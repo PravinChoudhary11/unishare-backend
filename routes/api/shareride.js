@@ -1,6 +1,6 @@
 const express = require('express');
-const supabase = require('../config/supabase');
-const { requireAuth, optionalAuth, requireShareRideOwnershipOrAdmin } = require('../middleware/requireAuth');
+const supabase = require('../../config/supabase');
+const { requireAuth, optionalAuth, requireShareRideOwnershipOrAdmin } = require('../../middleware/requireAuth');
 
 const router = express.Router();
 

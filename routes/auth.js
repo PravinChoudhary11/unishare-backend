@@ -8,9 +8,6 @@ const passport = require('passport');
 
 // Start Google OAuth
 router.get('/google', (req, res, next) => {
-  console.log('🔄 Starting Google OAuth flow');
-  console.log('Session before OAuth:', req.sessionID);
-  
   passport.authenticate('google', {
     scope: ['profile', 'email'],
     prompt: 'consent'
@@ -20,21 +17,12 @@ router.get('/google', (req, res, next) => {
 // Callback - FIXED VERSION
 router.get(
   '/google/callback',
-  (req, res, next) => {
-    console.log('🔄 Google OAuth callback received');
-    console.log('Session ID in callback:', req.sessionID);
-    next();
-  },
   passport.authenticate('google', { 
     failureRedirect: `${process.env.FRONTEND_URL}?auth=failed`,
     failureMessage: true
   }),
   async (req, res) => {
     try {
-      console.log('✅ OAuth successful for user:', req.user?.id);
-      console.log('Session ID after auth:', req.sessionID);
-      console.log('Is authenticated:', req.isAuthenticated());
-      
       // Ensure session is saved before redirect
       req.session.save((err) => {
         if (err) {
@@ -42,7 +30,6 @@ router.get(
           return res.redirect(`${process.env.FRONTEND_URL}?auth=session_error`);
         }
         
-        console.log('💾 Session saved successfully');
         res.redirect(`${process.env.FRONTEND_URL}?auth=success`);
       });
       
@@ -76,7 +63,6 @@ router.get('/me', async (req, res) => {
 
 // Enhanced logout
 router.get('/logout', (req, res, next) => {
-  console.log('🚪 Logout requested for user:', req.user?.id);
   const sid = req.sessionID;
   
   req.logout({ keepSessionInfo: false }, (err) => {
@@ -105,7 +91,6 @@ router.get('/logout', (req, res, next) => {
         sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'
       });
       
-      console.log('✅ Logout completed successfully');
       res.redirect(`${process.env.FRONTEND_URL}?logout=success`);
     });
   });
