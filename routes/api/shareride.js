@@ -831,12 +831,219 @@ router.put('/:id', requireAuth, requireShareRideOwnershipOrAdmin(), async (req, 
   }
 });
 
-// DELETE /api/shareride/:id - Cancel/delete ride
+// PATCH /api/shareride/:id - Partially update ride (for drivers to modify specific fields)
+router.patch('/:id', requireAuth, requireShareRideOwnershipOrAdmin(), async (req, res) => {
+  try {
+    const rideId = req.params.id;
+    const userId = req.userId;
+    const updates = req.body;
+    
+    console.log('🔧 Partially updating ride:', rideId, 'by user:', userId);
+    console.log('📝 Fields to update:', Object.keys(updates));
+
+    // Get current ride data first
+    const { data: currentRide, error: fetchError } = await supabase
+      .from('shared_rides')
+      .select('*')
+      .eq('id', rideId)
+      .single();
+
+    if (fetchError || !currentRide) {
+      console.error('❌ Error fetching ride for update:', fetchError);
+      return res.status(404).json({
+        success: false,
+        message: 'Ride not found'
+      });
+    }
+
+    // Build update object with only provided fields
+    const updateData = {
+      updated_at: new Date().toISOString()
+    };
+
+    // Handle each possible field update
+    if (updates.from !== undefined) {
+      if (!updates.from || !updates.from.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: 'Starting location cannot be empty'
+        });
+      }
+      updateData.from_location = updates.from.trim();
+    }
+
+    if (updates.to !== undefined) {
+      if (!updates.to || !updates.to.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: 'Destination cannot be empty'
+        });
+      }
+      updateData.to_location = updates.to.trim();
+    }
+
+    if (updates.date !== undefined) {
+      if (!updates.date) {
+        return res.status(400).json({
+          success: false,
+          message: 'Date cannot be empty'
+        });
+      }
+      updateData.date = updates.date;
+    }
+
+    if (updates.time !== undefined) {
+      if (!updates.time) {
+        return res.status(400).json({
+          success: false,
+          message: 'Time cannot be empty'
+        });
+      }
+      updateData.time = updates.time;
+    }
+
+    // Validate date and time if either is being updated
+    if (updates.date !== undefined || updates.time !== undefined) {
+      const checkDate = updates.date || currentRide.date;
+      const checkTime = updates.time || currentRide.time;
+      
+      if (checkDate && checkTime) {
+        const rideDateTime = new Date(`${checkDate} ${checkTime}`);
+        if (rideDateTime <= new Date()) {
+          return res.status(400).json({
+            success: false,
+            message: 'Ride date and time must be in the future'
+          });
+        }
+      }
+    }
+
+    if (updates.vehicle !== undefined) {
+      if (!updates.vehicle || !updates.vehicle.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: 'Vehicle information cannot be empty'
+        });
+      }
+      updateData.vehicle_info = updates.vehicle.trim();
+    }
+
+    if (updates.price !== undefined) {
+      if (!updates.price || isNaN(updates.price) || parseFloat(updates.price) <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Valid price is required'
+        });
+      }
+      updateData.price = parseFloat(updates.price);
+    }
+
+    if (updates.seats !== undefined) {
+      const newSeats = parseInt(updates.seats);
+      if (!newSeats || newSeats <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Valid number of seats is required'
+        });
+      }
+
+      // Calculate how many seats are booked
+      const bookedSeats = currentRide.seats - currentRide.available_seats;
+      
+      // Ensure new seat count doesn't go below booked seats
+      if (newSeats < bookedSeats) {
+        return res.status(400).json({
+          success: false,
+          message: `Cannot reduce seats below ${bookedSeats} (already booked)`
+        });
+      }
+
+      updateData.seats = newSeats;
+      updateData.available_seats = newSeats - bookedSeats;
+    }
+
+    if (updates.description !== undefined) {
+      updateData.description = updates.description?.trim() || null;
+    }
+
+    if (updates.contacts !== undefined) {
+      const contactInfo = formatContactInfo(updates.contacts);
+      if (Object.keys(contactInfo).length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'At least one contact method is required'
+        });
+      }
+      updateData.contact_info = contactInfo;
+    }
+
+    if (updates.contact_info !== undefined) {
+      if (!updates.contact_info || Object.keys(updates.contact_info).length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'At least one contact method is required'
+        });
+      }
+      updateData.contact_info = updates.contact_info;
+    }
+
+    // Check if any fields were actually provided for update
+    const fieldsToUpdate = Object.keys(updateData).filter(key => key !== 'updated_at');
+    if (fieldsToUpdate.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No valid fields provided for update'
+      });
+    }
+
+    // Update in database
+    const { data: updatedRide, error } = await supabase
+      .from('shared_rides')
+      .update(updateData)
+      .eq('id', rideId)
+      .select(`
+        *,
+        users:user_id (
+          id,
+          name,
+          email
+        )
+      `)
+      .single();
+
+    if (error) {
+      console.error('❌ Database error updating ride:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to update ride',
+        details: error.message
+      });
+    }
+
+    console.log('✅ Ride partially updated successfully:', rideId);
+    res.json({
+      success: true,
+      data: updatedRide,
+      message: `Ride updated successfully (${fieldsToUpdate.length} field${fieldsToUpdate.length === 1 ? '' : 's'} modified)`,
+      updated_fields: fieldsToUpdate
+    });
+
+  } catch (error) {
+    console.error('❌ Error in /:id PATCH route:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      details: error.message
+    });
+  }
+});
+
+// DELETE /api/shareride/:id - Delete ride
 router.delete('/:id', requireAuth, requireShareRideOwnershipOrAdmin(), async (req, res) => {
   try {
     const rideId = req.params.id;
     const userId = req.userId;
-    console.log('🗑️ Cancelling ride:', rideId, 'by user:', userId);
+    console.log('🗑️ Deleting ride:', rideId, 'by user:', userId);
 
     // Get ride details before deletion
     // Note: Ownership/admin access already verified by middleware
@@ -859,34 +1066,31 @@ router.delete('/:id', requireAuth, requireShareRideOwnershipOrAdmin(), async (re
       .from('ride_requests')
       .update({ 
         status: 'cancelled',
-        response_message: 'Ride was cancelled by driver',
+        response_message: 'Ride was deleted by driver',
         updated_at: new Date().toISOString()
       })
       .eq('ride_id', rideId)
       .in('status', ['pending', 'confirmed']);
 
-    // Update ride status to cancelled instead of deleting (admin/owner access already verified)
-    const { error: updateError } = await supabase
+    // Actually delete the ride record (admin/owner access already verified)
+    const { error: deleteError } = await supabase
       .from('shared_rides')
-      .update({ 
-        status: 'cancelled',
-        updated_at: new Date().toISOString()
-      })
+      .delete()
       .eq('id', rideId);
 
-    if (updateError) {
-      console.error('❌ Database error cancelling ride:', updateError);
+    if (deleteError) {
+      console.error('❌ Database error deleting ride:', deleteError);
       return res.status(500).json({
         success: false,
-        message: 'Failed to cancel ride',
-        details: updateError.message
+        message: 'Failed to delete ride',
+        details: deleteError.message
       });
     }
 
-    console.log('✅ Ride cancelled successfully:', rideId);
+    console.log('✅ Ride deleted successfully:', rideId);
     res.json({
       success: true,
-      message: `Ride from ${existingRide.from_location} to ${existingRide.to_location} cancelled successfully`
+      message: `Ride from ${existingRide.from_location} to ${existingRide.to_location} deleted successfully`
     });
 
   } catch (error) {

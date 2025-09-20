@@ -27,6 +27,7 @@ const apiNoticeRoutes = require('./routes/api/notice');
 const apiContactRoutes = require('./routes/api/contacts');
 const apiResourceRoutes = require('./routes/api/resources');
 const apiNotificationRoutes = require('./routes/api/notifications');
+const apiProfileRoutes = require('./routes/api/profile');
 
 // Admin Routes - Admin management routes (from /routes/admin/)
 const adminSharerideRoutes = require('./routes/admin/shareride');
@@ -167,6 +168,7 @@ app.use('/api/announcements', apiAnnouncementRoutes); // PUBLIC: Announcements v
 app.use('/api/resources', apiResourceRoutes); // PUBLIC: Resources viewing + suggestion system
 app.use('/api/contacts', apiContactRoutes); // PUBLIC: Contacts directory viewing
 app.use('/api/notifications', apiNotificationRoutes); // USER: Personal notifications management
+app.use('/api/profile', apiProfileRoutes); // USER: Profile management + public profile viewing
 
 // =========================
 // Admin Routes (Admin Access - All Data with Full CRUD)

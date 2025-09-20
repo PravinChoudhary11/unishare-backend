@@ -209,6 +209,7 @@
     .get { background: var(--success); color: white; }
     .post { background: var(--info); color: white; }
     .put { background: var(--warning); color: white; }
+    .patch { background: #9f7aea; color: white; }
     .delete { background: var(--danger); color: white; }
     
     .stats {
@@ -423,6 +424,9 @@
             </div>
             <div class="endpoint">
               <span class="method put">PUT</span> /api/shareride/requests/:id/respond - Respond to request
+            </div>
+            <div class="endpoint">
+              <span class="method patch">PATCH</span> /api/shareride/:id - Update specific fields of posted ride
             </div>
 
             <h4>Lost & Found</h4>

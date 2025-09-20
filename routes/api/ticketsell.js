@@ -1,31 +1,8 @@
 const express = require('express');
-const multer = require('multer');
-const path = require('path');
 const supabase = require('../../config/supabase');
 const { requireAuth, optionalAuth, requireTicketOwnershipOrAdmin } = require('../../middleware/requireAuth');
 
 const router = express.Router();
-
-// Configure multer for image uploads
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { 
-    fileSize: 5 * 1024 * 1024, // 5MB max
-    files: 1 // Single file upload
-  },
-  fileFilter: (req, file, cb) => {
-    if (file.fieldname !== 'image') {
-      return cb(null, false); // Skip non-image fields
-    }
-    
-    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
-    if (allowedTypes.includes(file.mimetype)) {
-      cb(null, true);
-    } else {
-      cb(new Error('Only JPEG, PNG, and WebP images are allowed'), false);
-    }
-  }
-});
 
 // Helper function to format contact info
 const formatContactInfo = (contacts) => {
@@ -98,51 +75,7 @@ const validateTicketData = (data) => {
 
   return errors;
 };
-const uploadImageToStorage = async (file, userId) => {
-  if (!file) return null;
-  
-  try {
-    // Generate secure filename
-    const timestamp = Date.now();
-    const randomString = Math.random().toString(36).substring(2, 8);
-    const fileExt = path.extname(file.originalname).toLowerCase();
-    const fileName = `tickets/${userId}/${timestamp}_${randomString}${fileExt}`;
 
-    console.log('📸 Uploading ticket image to:', fileName);
-
-    // Upload to Supabase Storage
-    const { data, error } = await supabase.storage
-      .from('ticket-images')
-      .upload(fileName, file.buffer, {
-        contentType: file.mimetype,
-        cacheControl: '3600',
-        upsert: false
-      });
-
-    if (error) {
-      console.error('❌ Storage upload error:', error);
-      throw new Error(`Image upload failed: ${error.message}`);
-    }
-
-    // Get public URL
-    const { data: urlData } = supabase.storage
-      .from('ticket-images')
-      .getPublicUrl(fileName);
-
-    if (!urlData?.publicUrl) {
-      throw new Error('Failed to generate image URL');
-    }
-
-    console.log('✅ Ticket image uploaded successfully:', urlData.publicUrl);
-    return {
-      url: urlData.publicUrl,
-      path: fileName
-    };
-  } catch (error) {
-    console.error('❌ Image upload helper error:', error);
-    throw error;
-  }
-};
 
 // GET /api/tickets/my - Get current user's tickets
 router.get('/my', requireAuth, async (req, res) => {
@@ -211,39 +144,42 @@ router.get('/my', requireAuth, async (req, res) => {
   }
 });
 
-// GET /api/tickets/test - Test authentication
-router.get('/test', requireAuth, (req, res) => {
-  res.json({
-    success: true,
-    message: 'Authentication successful! You can now create tickets.',
-    user: {
-      id: req.userId,
-      name: req.user?.name,
-      email: req.user?.email
-    },
-    sessionID: req.sessionID
-  });
-});
-
 // POST /api/tickets/create - Create new ticket listing
-router.post('/create', requireAuth, upload.single('image'), async (req, res) => {
+router.post('/create', requireAuth, async (req, res) => {
   try {
     const userId = req.userId;
-    console.log('🎫 Creating new ticket listing for user:', userId);
-    console.log('📸 Has image file:', !!req.file);
-
     let ticketData;
 
-    // Parse ticket data from form
+    // Parse ticket data - handle both direct and nested formats
     try {
-      ticketData = typeof req.body.ticketData === 'string' 
-        ? JSON.parse(req.body.ticketData) 
-        : req.body;
+      if (typeof req.body === 'object' && req.body !== null) {
+        // If body has a ticketData field, use that
+        if (req.body.ticketData) {
+          ticketData = typeof req.body.ticketData === 'string' 
+            ? JSON.parse(req.body.ticketData) 
+            : req.body.ticketData;
+        } else {
+          // Otherwise use the body directly
+          ticketData = req.body;
+        }
+      } else {
+        ticketData = JSON.parse(req.body);
+      }
+      console.log('📋 Parsed ticket data:', JSON.stringify(ticketData, null, 2));
     } catch (parseError) {
       console.error('❌ JSON parsing error:', parseError);
       return res.status(400).json({
         success: false,
         message: 'Invalid ticket data format'
+      });
+    }
+
+    // Check if ticketData is empty
+    if (!ticketData || (typeof ticketData === 'object' && Object.keys(ticketData).length === 0)) {
+      console.error('❌ Empty ticket data received');
+      return res.status(400).json({
+        success: false,
+        message: 'No ticket data received. Please ensure you are sending the data in the request body.'
       });
     }
 
@@ -263,22 +199,6 @@ router.post('/create', requireAuth, upload.single('image'), async (req, res) => 
       });
     }
 
-    // Upload image if provided
-    let imageUrl = null;
-    if (req.file) {
-      try {
-        const uploadResult = await uploadImageToStorage(req.file, userId);
-        imageUrl = uploadResult.url;
-      } catch (uploadError) {
-        console.error('❌ Image upload failed:', uploadError);
-        return res.status(500).json({
-          success: false,
-          message: 'Image upload failed',
-          details: uploadError.message
-        });
-      }
-    }
-
     // Prepare ticket data for database
     const dbTicketData = {
       user_id: userId,
@@ -293,7 +213,6 @@ router.post('/create', requireAuth, upload.single('image'), async (req, res) => 
       ticket_type: ticketData.ticket_type || 'Standard',
       description: ticketData.description?.trim() || null,
       contact_info: ticketData.contact_info,
-      image_url: imageUrl,
       status: 'active',
       // Travel-specific fields
       origin: ticketData.origin?.trim() || null,
@@ -320,20 +239,6 @@ router.post('/create', requireAuth, upload.single('image'), async (req, res) => 
 
     if (error) {
       console.error('❌ Database error creating ticket:', error);
-      
-      // Clean up uploaded image if database insertion fails
-      if (imageUrl) {
-        try {
-          const imagePath = imageUrl.split('/ticket-images/')[1];
-          if (imagePath) {
-            await supabase.storage.from('ticket-images').remove([imagePath]);
-            console.log('🧹 Cleaned up uploaded image after database error');
-          }
-        } catch (cleanupError) {
-          console.warn('⚠️ Failed to cleanup image after database error:', cleanupError);
-        }
-      }
-
       return res.status(500).json({
         success: false,
         message: 'Failed to create ticket listing',
@@ -350,16 +255,6 @@ router.post('/create', requireAuth, upload.single('image'), async (req, res) => 
 
   } catch (error) {
     console.error('❌ Error in /create route:', error);
-
-    // Clean up uploaded image in case of error
-    if (req.file && req.file.path) {
-      try {
-        await fs.unlink(req.file.path);
-      } catch (unlinkError) {
-        console.error('❌ Error deleting uploaded file:', unlinkError);
-      }
-    }
-
     res.status(500).json({
       success: false,
       message: 'Internal server error',
@@ -369,20 +264,29 @@ router.post('/create', requireAuth, upload.single('image'), async (req, res) => 
 });
 
 // PUT /api/tickets/:id - Update ticket listing
-router.put('/:id', requireAuth, requireTicketOwnershipOrAdmin(), upload.single('image'), async (req, res) => {
+router.put('/:id', requireAuth, requireTicketOwnershipOrAdmin(), async (req, res) => {
   try {
     const ticketId = req.params.id;
     const userId = req.userId;
-    console.log('✏️ Updating ticket:', ticketId, 'by user:', userId);
-    console.log('📸 Has new image file:', !!req.file);
 
     let ticketData;
 
-    // Parse ticket data from form
+    // Parse ticket data - handle both direct and nested formats
     try {
-      ticketData = typeof req.body.ticketData === 'string' 
-        ? JSON.parse(req.body.ticketData) 
-        : req.body;
+      if (typeof req.body === 'object' && req.body !== null) {
+        // If body has a ticketData field, use that
+        if (req.body.ticketData) {
+          ticketData = typeof req.body.ticketData === 'string' 
+            ? JSON.parse(req.body.ticketData) 
+            : req.body.ticketData;
+        } else {
+          // Otherwise use the body directly
+          ticketData = req.body;
+        }
+      } else {
+        ticketData = JSON.parse(req.body);
+      }
+      console.log('📋 Parsed ticket data:', JSON.stringify(ticketData, null, 2));
     } catch (parseError) {
       console.error('❌ JSON parsing error:', parseError);
       return res.status(400).json({
@@ -407,52 +311,6 @@ router.put('/:id', requireAuth, requireTicketOwnershipOrAdmin(), upload.single('
       });
     }
 
-    // Get current ticket to access existing image
-    const { data: existingTicket, error: fetchError } = await supabase
-      .from('tickets')
-      .select('image_url')
-      .eq('id', ticketId)
-      .eq('user_id', userId)
-      .single();
-
-    if (fetchError || !existingTicket) {
-      console.error('❌ Error fetching existing ticket:', fetchError);
-      return res.status(404).json({
-        success: false,
-        message: 'Ticket not found or you do not have permission to edit it'
-      });
-    }
-
-    let imageUrl = existingTicket.image_url; // Keep existing image by default
-
-    // Upload new image if provided
-    if (req.file) {
-      try {
-        const uploadResult = await uploadImageToStorage(req.file, userId);
-        imageUrl = uploadResult.url;
-
-        // Delete old image if it exists
-        if (existingTicket.image_url) {
-          try {
-            const oldImagePath = existingTicket.image_url.split('/ticket-images/')[1];
-            if (oldImagePath) {
-              await supabase.storage.from('ticket-images').remove([oldImagePath]);
-              console.log('🧹 Deleted old image:', oldImagePath);
-            }
-          } catch (deleteError) {
-            console.warn('⚠️ Failed to delete old image:', deleteError);
-          }
-        }
-      } catch (uploadError) {
-        console.error('❌ Image upload failed:', uploadError);
-        return res.status(500).json({
-          success: false,
-          message: 'Image upload failed',
-          details: uploadError.message
-        });
-      }
-    }
-
     // Prepare update data
     const updateData = {
       title: ticketData.title.trim(),
@@ -466,7 +324,6 @@ router.put('/:id', requireAuth, requireTicketOwnershipOrAdmin(), upload.single('
       ticket_type: ticketData.ticket_type || 'Standard',
       description: ticketData.description?.trim() || null,
       contact_info: ticketData.contact_info,
-      image_url: imageUrl,
       // Travel-specific fields
       origin: ticketData.origin?.trim() || null,
       destination: ticketData.destination?.trim() || null,
@@ -524,13 +381,11 @@ router.delete('/:id', requireAuth, requireTicketOwnershipOrAdmin(), async (req, 
   try {
     const ticketId = req.params.id;
     const userId = req.userId;
-    console.log('🗑️ Deleting ticket:', ticketId, 'by user:', userId);
 
-    // Get ticket details before deletion (for cleanup and response)
-    // Note: Ownership/admin access already verified by middleware
+
     const { data: existingTicket, error: fetchError } = await supabase
       .from('tickets')
-      .select('title, image_url')
+      .select('title')
       .eq('id', ticketId)
       .single();
 
@@ -555,19 +410,6 @@ router.delete('/:id', requireAuth, requireTicketOwnershipOrAdmin(), async (req, 
         message: 'Failed to delete ticket listing',
         details: deleteError.message
       });
-    }
-
-    // Delete associated image from storage
-    if (existingTicket?.image_url) {
-      try {
-        const imagePath = existingTicket.image_url.split('/ticket-images/')[1];
-        if (imagePath) {
-          await supabase.storage.from('ticket-images').remove([imagePath]);
-          console.log('🧹 Deleted associated image:', imagePath);
-        }
-      } catch (imageError) {
-        console.warn('⚠️ Failed to delete image:', imageError.message);
-      }
     }
 
     console.log('✅ Ticket deleted successfully:', ticketId);
@@ -899,31 +741,6 @@ router.get('/stats', requireAuth, async (req, res) => {
   }
 });
 
-// Multer error handling middleware
-router.use((err, req, res, next) => {
-  if (err instanceof multer.MulterError) {
-    if (err.code === 'LIMIT_FILE_SIZE') {
-      return res.status(400).json({
-        success: false,
-        message: 'File too large. Maximum size is 5MB.'
-      });
-    }
-    if (err.code === 'LIMIT_UNEXPECTED_FILE') {
-      return res.status(400).json({
-        success: false,
-        message: 'Unexpected file field'
-      });
-    }
-  }
-  
-  if (err.message.includes('Only JPEG, PNG, and WebP images are allowed')) {
-    return res.status(400).json({
-      success: false,
-      message: 'Invalid file type. Only JPEG, PNG, and WebP images are allowed.'
-    });
-  }
-  
-  next(err);
-});
+
 
 module.exports = router;

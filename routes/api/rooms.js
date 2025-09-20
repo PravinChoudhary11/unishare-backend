@@ -17,7 +17,7 @@ const upload = multer({
 
 // Validation middleware
 const validateRoomData = (req, res, next) => {
-  const { title, rent, location, beds, move_in_date, contact_info } = req.body;
+  const { title, description, rent, location, beds, move_in_date, contact_info } = req.body;
   const errors = [];
 
   // Parse contact_info
@@ -29,6 +29,7 @@ const validateRoomData = (req, res, next) => {
   }
 
   if (!title?.trim()) errors.push('Title is required');
+  if (description && description.length > 1000) errors.push('Description cannot exceed 1000 characters');
   if (!rent || isNaN(rent) || parseInt(rent) <= 0) errors.push('Rent must be a positive number');
   if (!location?.trim()) errors.push('Location is required');
   if (!beds || isNaN(beds) || parseInt(beds) <= 0) errors.push('Number of beds must be positive');
@@ -67,13 +68,21 @@ router.post('/', requireAuth, upload.array('photos', 10), validateRoomData, asyn
   try {
     console.log('📝 Creating room for user:', req.user.id);
     
-    const roomData = { 
-      ...req.body, 
+    // Only include allowed fields for database insert (matching actual database schema)
+    const allowedFields = ['title', 'description', 'rent', 'location', 'beds', 'move_in_date', 'contact_info'];
+    const roomData = {
       photos: [],
       user_id: req.user.id,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
+    
+    // Add only allowed fields from request body
+    allowedFields.forEach(field => {
+      if (req.body[field] !== undefined) {
+        roomData[field] = req.body[field];
+      }
+    });
 
     if (req.files?.length) {
       console.log('📸 Uploading', req.files.length, 'photos');
@@ -215,15 +224,45 @@ router.put('/:id', requireAuth, requireRoomOwnershipOrAdmin(), upload.array('pho
   try {
     console.log('✏️ Updating room:', req.params.id, 'by user:', req.user.id);
 
-    const roomData = { 
-      ...req.body, 
+    // Only include allowed fields for database update (matching actual database schema)
+    const allowedFields = ['title', 'description', 'rent', 'location', 'beds', 'move_in_date', 'contact_info', 'photos'];
+    const roomData = {
       updated_at: new Date().toISOString()
     };
+    
+    // Add only allowed fields from request body
+    allowedFields.forEach(field => {
+      if (req.body[field] !== undefined) {
+        roomData[field] = req.body[field];
+      }
+    });
 
     // Handle new photos if provided
     if (req.files?.length) {
       console.log('📸 Uploading new photos');
+      
+      // Get existing photos for cleanup
+      const { data: existingRoom } = await supabase
+        .from('rooms')
+        .select('photos')
+        .eq('id', req.params.id)
+        .single();
+      
+      // Upload new photos
       roomData.photos = await uploadPhotos(req.files);
+      
+      // Clean up old photos from storage
+      if (existingRoom?.photos?.length) {
+        console.log('🧹 Cleaning up', existingRoom.photos.length, 'old photos');
+        for (const photoUrl of existingRoom.photos) {
+          try {
+            const fileName = photoUrl.split('/').pop();
+            await supabase.storage.from('room-photos').remove([fileName]);
+          } catch (cleanupError) {
+            console.warn('⚠️ Failed to cleanup old photo:', cleanupError.message);
+          }
+        }
+      }
     }
 
     const { data, error } = await supabase
