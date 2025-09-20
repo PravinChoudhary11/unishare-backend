@@ -5,6 +5,71 @@ const { requireAuth } = require('../../middleware/requireAuth');
 
 const router = express.Router();
 
+// Security middleware to ensure users can only access their own profile data
+const requireOwnProfile = async (req, res, next) => {
+  try {
+    const userId = req.userId;
+    const targetUserId = req.params.userId || req.body.user_id;
+    
+    // If no target user ID is specified, they're accessing their own profile
+    if (!targetUserId) {
+      return next();
+    }
+    
+    // Ensure user can only access their own profile for write operations
+    if (targetUserId !== userId) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied: You can only modify your own profile',
+        error_code: 'FORBIDDEN_ACCESS'
+      });
+    }
+    
+    next();
+  } catch (error) {
+    console.error('Error in requireOwnProfile middleware:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      details: error.message
+    });
+  }
+};
+
+// Rate limiting helper to prevent abuse
+const rateLimitTracker = new Map();
+const checkRateLimit = (req, res, next) => {
+  const userId = req.userId || req.ip;
+  const now = Date.now();
+  const windowMs = 60000; // 1 minute window
+  const maxRequests = 30; // Max 30 requests per minute per user
+  
+  if (!rateLimitTracker.has(userId)) {
+    rateLimitTracker.set(userId, { count: 1, resetTime: now + windowMs });
+    return next();
+  }
+  
+  const userLimit = rateLimitTracker.get(userId);
+  
+  if (now > userLimit.resetTime) {
+    // Reset the window
+    rateLimitTracker.set(userId, { count: 1, resetTime: now + windowMs });
+    return next();
+  }
+  
+  if (userLimit.count >= maxRequests) {
+    return res.status(429).json({
+      success: false,
+      message: 'Rate limit exceeded. Please try again later.',
+      error_code: 'RATE_LIMITED',
+      retry_after: Math.ceil((userLimit.resetTime - now) / 1000)
+    });
+  }
+  
+  userLimit.count++;
+  next();
+};
+
 // Configure multer for profile image uploads
 const storage = multer.memoryStorage();
 const upload = multer({
@@ -120,15 +185,16 @@ const validateCustomUserId = (customUserId) => {
   return { valid: true };
 };
 
-// GET /api/profile - Get current user's profile
+// GET /api/profile - Get current user's profile (authenticated users only)
 router.get('/', requireAuth, async (req, res) => {
   try {
     const userId = req.userId;
 
+    // Security: Users can only access their own profile data
     const { data: profile, error } = await supabase
       .from('user_profiles')
       .select('*')
-      .eq('user_id', userId)
+      .eq('user_id', userId) // This ensures they only get their own profile
       .single();
 
     if (error && error.code !== 'PGRST116') { // PGRST116 is "not found"
@@ -173,17 +239,18 @@ router.get('/', requireAuth, async (req, res) => {
   }
 });
 
-// GET /api/profile/:customUserId - Get user profile by custom user ID (public)
-router.get('/:customUserId', async (req, res) => {
+// GET /api/profile/:customUserId - Get user profile by custom user ID (PUBLIC READ-ONLY)
+router.get('/:customUserId', checkRateLimit, async (req, res) => {
   try {
     const customUserId = req.params.customUserId;
     
     // Add @ if not present
     const formattedUserId = customUserId.startsWith('@') ? customUserId : '@' + customUserId;
 
+    // PUBLIC ACCESS: Anyone can view basic profile info (no sensitive data)
     const { data: profile, error } = await supabase
       .from('user_profiles')
-      .select('user_id, display_name, bio, profile_image_url, custom_user_id, created_at')
+      .select('user_id, display_name, bio, profile_image_url, custom_user_id, created_at') // Limited fields for public access
       .eq('custom_user_id', formattedUserId)
       .single();
 
@@ -219,11 +286,15 @@ router.get('/:customUserId', async (req, res) => {
   }
 });
 
-// POST/PUT /api/profile - Create or update user profile
-router.post('/', requireAuth, upload.single('profileImage'), async (req, res) => {
+// POST/PUT /api/profile - Create or update user profile (AUTHENTICATED USERS - OWN PROFILE ONLY)
+router.post('/', requireAuth, requireOwnProfile, checkRateLimit, upload.single('profileImage'), async (req, res) => {
   try {
-    const userId = req.userId;
+    const userId = req.userId; // Always use authenticated user's ID
     const { display_name, bio, custom_user_id } = req.body;
+
+    // SECURITY: Prevent any attempt to modify another user's profile
+    // Even if someone tries to pass a different user_id in the body, we ignore it
+    // and only use the authenticated user's ID from the session
 
     // Validate custom user ID if provided
     if (custom_user_id) {
@@ -238,7 +309,7 @@ router.post('/', requireAuth, upload.single('profileImage'), async (req, res) =>
       // Check if custom user ID is already taken by another user
       const { data: existingUser, error: checkError } = await supabase
         .from('user_profiles')
-        .select('user_id')
+        .select('user_id, display_name')
         .eq('custom_user_id', custom_user_id)
         .neq('user_id', userId) // Exclude current user
         .single();
@@ -253,9 +324,11 @@ router.post('/', requireAuth, upload.single('profileImage'), async (req, res) =>
       }
 
       if (existingUser) {
-        return res.status(400).json({
+        return res.status(409).json({ // 409 Conflict
           success: false,
-          message: 'This custom user ID is already taken'
+          message: `The username ${custom_user_id} is already taken`,
+          error_code: 'USERNAME_TAKEN',
+          details: `This custom user ID is already in use by another user`
         });
       }
     }
@@ -342,22 +415,23 @@ router.post('/', requireAuth, upload.single('profileImage'), async (req, res) =>
   }
 });
 
-// PUT /api/profile - Update user profile (same as POST but more explicit)
-router.put('/', requireAuth, upload.single('profileImage'), async (req, res) => {
-  // Reuse the POST logic
+// PUT /api/profile - Update user profile (AUTHENTICATED USERS - OWN PROFILE ONLY)
+router.put('/', requireAuth, requireOwnProfile, checkRateLimit, upload.single('profileImage'), async (req, res) => {
+  // Reuse the POST logic with enhanced security
   return router.handle({ ...req, method: 'POST' }, res);
 });
 
-// DELETE /api/profile/image - Delete profile image
-router.delete('/image', requireAuth, async (req, res) => {
+// DELETE /api/profile/image - Delete profile image (AUTHENTICATED USERS - OWN PROFILE ONLY)
+router.delete('/image', requireAuth, checkRateLimit, async (req, res) => {
   try {
-    const userId = req.userId;
+    const userId = req.userId; // Always use authenticated user's ID
 
-    // Get existing profile
+    // SECURITY: User can only delete their own profile image
+    // Get existing profile (ensuring it belongs to the authenticated user)
     const { data: existingProfile, error: fetchError } = await supabase
       .from('user_profiles')
       .select('profile_image_url')
-      .eq('user_id', userId)
+      .eq('user_id', userId) // Only access their own profile
       .single();
 
     if (fetchError) {
@@ -413,8 +487,8 @@ router.delete('/image', requireAuth, async (req, res) => {
   }
 });
 
-// GET /api/profile/search/:query - Search users by display name or custom user ID
-router.get('/search/:query', async (req, res) => {
+// GET /api/profile/search/:query - Search users by display name or custom user ID (PUBLIC with rate limiting)
+router.get('/search/:query', checkRateLimit, async (req, res) => {
   try {
     const query = req.params.query.trim();
     
@@ -452,6 +526,158 @@ router.get('/search/:query', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Internal server error',
+      details: error.message
+    });
+  }
+});
+
+// GET /api/profile/check-availability/:customUserId - Check if custom user ID is available (PUBLIC with rate limiting)
+router.get('/check-availability/:customUserId', checkRateLimit, async (req, res) => {
+  try {
+    const customUserId = req.params.customUserId;
+    
+    // Add @ if not present and validate format
+    const formattedUserId = customUserId.startsWith('@') ? customUserId : '@' + customUserId;
+    
+    // Validate custom user ID format
+    const validation = validateCustomUserId(formattedUserId);
+    if (!validation.valid) {
+      return res.status(400).json({
+        success: false,
+        available: false,
+        message: validation.error,
+        error_code: 'INVALID_FORMAT'
+      });
+    }
+
+    // Check if custom user ID is already taken
+    const { data: existingUser, error: checkError } = await supabase
+      .from('user_profiles')
+      .select('user_id, display_name, created_at')
+      .eq('custom_user_id', formattedUserId)
+      .single();
+
+    if (checkError && checkError.code !== 'PGRST116') {
+      console.error('Database error checking availability:', checkError);
+      return res.status(500).json({
+        success: false,
+        available: false,
+        message: 'Failed to check availability',
+        details: checkError.message
+      });
+    }
+
+    const isAvailable = !existingUser;
+
+    res.json({
+      success: true,
+      available: isAvailable,
+      custom_user_id: formattedUserId,
+      message: isAvailable 
+        ? `${formattedUserId} is available!` 
+        : `${formattedUserId} is already taken`,
+      ...(existingUser && {
+        taken_by: {
+          display_name: existingUser.display_name || 'Anonymous User',
+          taken_at: existingUser.created_at
+        }
+      })
+    });
+
+  } catch (error) {
+    console.error('Error in /profile/check-availability route:', error);
+    res.status(500).json({
+      success: false,
+      available: false,
+      message: 'Internal server error',
+      details: error.message
+    });
+  }
+});
+
+// GET /api/profile/suggest-username/:baseUsername - Suggest available usernames (PUBLIC with rate limiting)
+router.get('/suggest-username/:baseUsername', checkRateLimit, async (req, res) => {
+  try {
+    const baseUsername = req.params.baseUsername.replace('@', ''); // Remove @ if present
+    
+    // Validate base username format (without @)
+    if (!/^[a-zA-Z0-9_]{2,20}$/.test(baseUsername)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Base username must contain 2-20 characters (letters, numbers, underscores only)',
+        suggestions: []
+      });
+    }
+
+    const suggestions = [];
+    const baseWithAt = '@' + baseUsername;
+    
+    // Check if the base username is available
+    const { data: baseExists } = await supabase
+      .from('user_profiles')
+      .select('custom_user_id')
+      .eq('custom_user_id', baseWithAt)
+      .single();
+    
+    if (!baseExists) {
+      suggestions.push({
+        username: baseWithAt,
+        available: true,
+        type: 'original'
+      });
+    }
+
+    // Generate alternative suggestions
+    const alternatives = [
+      `${baseUsername}_`,
+      `${baseUsername}1`,
+      `${baseUsername}2`,
+      `${baseUsername}3`,
+      `${baseUsername}_1`,
+      `${baseUsername}_2`,
+      `_${baseUsername}`,
+      `${baseUsername}123`,
+      `${baseUsername}_${new Date().getFullYear()}`,
+      `${baseUsername}_user`
+    ];
+
+    // Check availability for each suggestion
+    for (const alt of alternatives) {
+      if (suggestions.length >= 10) break; // Limit to 10 suggestions
+      
+      const altWithAt = '@' + alt;
+      if (altWithAt.length <= 21) { // Respect length constraint
+        
+        const { data: exists } = await supabase
+          .from('user_profiles')
+          .select('custom_user_id')
+          .eq('custom_user_id', altWithAt)
+          .single();
+        
+        if (!exists) {
+          suggestions.push({
+            username: altWithAt,
+            available: true,
+            type: 'suggestion'
+          });
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      base_username: baseWithAt,
+      base_available: !baseExists,
+      suggestions: suggestions,
+      message: `Found ${suggestions.length} available username suggestions`
+    });
+
+  } catch (error) {
+    console.error('Error in /profile/suggest-username route:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      suggestions: [],
       details: error.message
     });
   }
