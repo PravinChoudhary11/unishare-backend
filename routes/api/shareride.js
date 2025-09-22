@@ -153,13 +153,40 @@ router.get('/my', requireAuth, async (req, res) => {
   }
 });
 
-// GET /api/shareride/my/requests - Get ride requests for user's posted rides
+// GET /api/shareride/my/requests - Get requests that users made TO MY rides (requests I received as ride owner)
 router.get('/my/requests', requireAuth, async (req, res) => {
   try {
     const userId = req.userId;
-    console.log('📋 Fetching ride requests for user:', userId);
+    console.log('📋 Fetching requests received on my rides by user:', userId);
 
-    // Get all ride requests for rides posted by this user
+    // First get the user's ride IDs to ensure we only get requests for THEIR rides
+    const { data: userRides, error: ridesError } = await supabase
+      .from('shared_rides')
+      .select('id')
+      .eq('user_id', userId);
+
+    if (ridesError) {
+      console.error('❌ Database error fetching user rides:', ridesError);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to fetch your rides',
+        details: ridesError.message
+      });
+    }
+
+    if (!userRides || userRides.length === 0) {
+      console.log('✅ No rides found for user, returning empty requests');
+      return res.json({
+        success: true,
+        data: [],
+        message: 'No requests found (you have no rides posted)'
+      });
+    }
+
+    const rideIds = userRides.map(ride => ride.id);
+    console.log(`🔍 User ${userId} has ${rideIds.length} rides, fetching requests for ride IDs:`, rideIds);
+
+    // Get all ride requests for these specific rides only
     const { data: requests, error } = await supabase
       .from('ride_requests')
       .select(`
@@ -177,29 +204,162 @@ router.get('/my/requests', requireAuth, async (req, res) => {
           date,
           time,
           price,
-          seats
+          seats,
+          user_id
         )
       `)
-      .eq('ride.user_id', userId)
+      .in('ride_id', rideIds) // Only requests for user's rides
       .order('created_at', { ascending: false });
 
     if (error) {
-      console.error('❌ Database error fetching ride requests:', error);
+      console.error('❌ Database error fetching requests on my rides:', error);
       return res.status(500).json({
         success: false,
-        message: 'Failed to fetch ride requests',
+        message: 'Failed to fetch requests on your rides',
         details: error.message
       });
     }
 
-    console.log(`✅ Fetched ${requests?.length || 0} requests for user ${userId}`);
+    console.log(`📊 Raw requests data: ${requests?.length || 0} requests found`);
+    
+    // Security check: Filter out any requests that don't belong to user's rides
+    let filteredRequests = requests || [];
+    if (filteredRequests.length > 0) {
+      const beforeCount = filteredRequests.length;
+      filteredRequests = filteredRequests.filter(req => {
+        const isValidRide = req.ride && req.ride.user_id === userId;
+        if (!isValidRide && req.ride) {
+          console.warn(`🚨 SECURITY: Filtered out request ${req.id} - ride belongs to user ${req.ride.user_id}, not ${userId}`);
+        }
+        return isValidRide;
+      });
+      
+      if (beforeCount !== filteredRequests.length) {
+        console.warn(`🚨 SECURITY: Filtered out ${beforeCount - filteredRequests.length} requests not belonging to user ${userId}`);
+      }
+    }
+    
+    // Debug: Check for null ride data
+    if (filteredRequests && filteredRequests.length > 0) {
+      const nullRideRequests = filteredRequests.filter(req => !req.ride);
+      if (nullRideRequests.length > 0) {
+        console.warn(`⚠️ Found ${nullRideRequests.length} requests with null ride data:`, 
+          nullRideRequests.map(req => ({ id: req.id, ride_id: req.ride_id })));
+      }
+    }
+
+    // Enhance with requester profile information
+    if (filteredRequests && filteredRequests.length > 0) {
+      for (let request of filteredRequests) {
+        // Fetch requester profile
+        if (request.requester_id) {
+          const { data: profile } = await supabase
+            .from('user_profiles')
+            .select('display_name, profile_image_url, custom_user_id, bio')
+            .eq('user_id', request.requester_id)
+            .single();
+          
+          request.requester_profile = profile || null;
+        }
+
+        // If ride data is null, fetch it manually
+        if (!request.ride && request.ride_id) {
+          const { data: rideData } = await supabase
+            .from('shared_rides')
+            .select('id, from_location, to_location, date, time, price, seats, user_id')
+            .eq('id', request.ride_id)
+            .single();
+          
+          request.ride = rideData || null;
+          
+          if (!rideData) {
+            console.warn(`⚠️ Ride not found for ride_id: ${request.ride_id}`);
+          }
+        }
+      }
+    }
+
+    console.log(`✅ Fetched ${filteredRequests?.length || 0} requests on my rides for user ${userId}`);
     res.json({
       success: true,
-      data: requests || []
+      data: filteredRequests || [],
+      message: `Found ${filteredRequests?.length || 0} requests on your rides`
     });
 
   } catch (error) {
     console.error('❌ Error in /my/requests route:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      details: error.message
+    });
+  }
+});
+
+// GET /api/shareride/my/requested - Get requests that I made TO OTHER users' rides (requests I sent as passenger)
+router.get('/my/requested', requireAuth, async (req, res) => {
+  try {
+    const userId = req.userId;
+    console.log('📋 Fetching requests I made to other users rides:', userId);
+
+    // Get all ride requests made by this user to other people's rides
+    const { data: requests, error } = await supabase
+      .from('ride_requests')
+      .select(`
+        *,
+        ride:ride_id (
+          id,
+          from_location,
+          to_location,
+          date,
+          time,
+          price,
+          seats,
+          user_id,
+          owner:user_id (
+            id,
+            name,
+            email,
+            picture
+          )
+        )
+      `)
+      .eq('requester_id', userId) // Only requests made by current user
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('❌ Database error fetching my ride requests:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to fetch your ride requests',
+        details: error.message
+      });
+    }
+
+    // Enhance with ride owner profile information
+    if (requests && requests.length > 0) {
+      for (let request of requests) {
+        if (request.ride && request.ride.user_id) {
+          const { data: profile } = await supabase
+            .from('user_profiles')
+            .select('display_name, profile_image_url, custom_user_id, bio')
+            .eq('user_id', request.ride.user_id)
+            .single();
+          
+          request.ride_owner_profile = profile || null;
+        }
+      }
+    }
+
+    console.log(`✅ Fetched ${requests?.length || 0} requests I made for user ${userId}`);
+    res.json({
+      success: true,
+      data: requests || [],
+      message: `Found ${requests?.length || 0} ride requests you made`
+    });
+
+  } catch (error) {
+    console.error('❌ Error in /my/requested route:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error',
