@@ -4,9 +4,9 @@ const { EventEmitter } = require("events");
 const isProduction = process.env.NODE_ENV === "production";
 
 // Custom Supabase Session Store Class (inline to avoid separate file)
-class SupabaseSessionStore extends EventEmitter {
+class SupabaseSessionStore extends session.Store {
   constructor(options = {}) {
-    super(); // Call EventEmitter constructor
+    super(options); // Call Store constructor
     this.tableName = options.tableName || 'session';
     this.ttl = options.ttl || 7 * 24 * 60 * 60 * 1000; // 7 days in ms
     this.supabase = require('./supabase');
@@ -83,6 +83,63 @@ class SupabaseSessionStore extends EventEmitter {
         .eq('sid', sid);
 
       callback(error || null);
+    } catch (error) {
+      callback(error);
+    }
+  }
+
+
+
+  // Get all sessions (optional - for compatibility)
+  async all(callback) {
+    try {
+      const { data, error } = await this.supabase
+        .from(this.tableName)
+        .select('*');
+
+      if (error) {
+        return callback(error);
+      }
+
+      const sessions = {};
+      data.forEach(row => {
+        if (!row.expire || new Date(row.expire) >= new Date()) {
+          sessions[row.sid] = row.sess;
+        }
+      });
+
+      callback(null, sessions);
+    } catch (error) {
+      callback(error);
+    }
+  }
+
+  // Clear all sessions (optional - for compatibility)
+  async clear(callback) {
+    try {
+      const { error } = await this.supabase
+        .from(this.tableName)
+        .delete()
+        .neq('sid', ''); // Delete all records
+
+      callback(error || null);
+    } catch (error) {
+      callback(error);
+    }
+  }
+
+  // Get session count (optional - for compatibility)
+  async length(callback) {
+    try {
+      const { count, error } = await this.supabase
+        .from(this.tableName)
+        .select('*', { count: 'exact', head: true });
+
+      if (error) {
+        return callback(error);
+      }
+
+      callback(null, count);
     } catch (error) {
       callback(error);
     }
