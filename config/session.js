@@ -1,26 +1,64 @@
-// config/session.js - FIXED VERSION for cross-origin cookies
+// config/session.js - FIXED VERSION for cross-origin cookies with Supabase API fallback
 const session = require("express-session");
 const isProduction = process.env.NODE_ENV === "production";
 
 let sessionStore;
-if (isProduction && process.env.SUPABASE_DB_URL) {
+if (isProduction) {
   try {
-    const pgSession = require("connect-pg-simple")(session);
-    
-    sessionStore = new pgSession({
-      conString: process.env.SUPABASE_DB_URL,
-      tableName: "session",
-      createTableIfMissing: true,
-      schemaName: "public",
-      pruneSessionInterval: 60,
-      errorLog: (err) => {
-        console.error('Session store error:', err.message);
-      }
+    // Primary: Use Supabase API store (more reliable than direct PostgreSQL)
+    console.log('🔄 Setting up Supabase API session store...');
+    const SupabaseSessionStore = require('./supabase-session-store');
+    sessionStore = new SupabaseSessionStore({
+      tableName: 'session', // Use singular form - matches existing table
+      ttl: 7 * 24 * 60 * 60 * 1000 // 7 days in milliseconds
     });
+    console.log('✓ Supabase API session store configured');
   } catch (error) {
-    console.error('❌ Failed to setup PostgreSQL session store:', error.message);
-    sessionStore = null;
+    console.error('❌ Failed to setup Supabase API session store:', error.message);
+    
+    // Fallback: Try PostgreSQL direct connection
+    if (process.env.SUPABASE_DB_URL) {
+      try {
+        console.log('🔄 Falling back to PostgreSQL direct connection...');
+        const pgSession = require("connect-pg-simple")(session);
+        const { Pool } = require('pg');
+        
+        const pool = new Pool({
+          connectionString: process.env.SUPABASE_DB_URL,
+          ssl: {
+            rejectUnauthorized: false
+          },
+          max: 3,
+          idleTimeoutMillis: 30000,
+          connectionTimeoutMillis: 10000,
+        });
+        
+        sessionStore = new pgSession({
+          pool: pool,
+          tableName: "session", // Use singular form
+          createTableIfMissing: false, // Don't try to create table
+          schemaName: "public",
+          pruneSessionInterval: 60 * 15,
+          errorLog: (err) => {
+            console.error('Session store error:', err?.message || 'Unknown error');
+          },
+          ttl: 7 * 24 * 60 * 60,
+          disableTouch: false
+        });
+
+        console.log('✓ PostgreSQL session store configured as fallback');
+      } catch (pgError) {
+        console.error('❌ PostgreSQL fallback also failed:', pgError.message);
+        console.log('🔄 Using memory store (sessions will not persist)');
+        sessionStore = null;
+      }
+    } else {
+      console.log('🔄 Using memory store (sessions will not persist)');
+      sessionStore = null;
+    }
   }
+} else {
+  console.log('🔄 Using memory store for sessions (development mode)');
 }
 
 // Check if frontend is on Vercel (cross-origin HTTPS)
