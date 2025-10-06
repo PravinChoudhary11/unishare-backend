@@ -1,10 +1,12 @@
 // config/session.js - FIXED VERSION for cross-origin cookies with Supabase API fallback
 const session = require("express-session");
+const { EventEmitter } = require("events");
 const isProduction = process.env.NODE_ENV === "production";
 
 // Custom Supabase Session Store Class (inline to avoid separate file)
-class SupabaseSessionStore {
+class SupabaseSessionStore extends EventEmitter {
   constructor(options = {}) {
+    super(); // Call EventEmitter constructor
     this.tableName = options.tableName || 'session';
     this.ttl = options.ttl || 7 * 24 * 60 * 60 * 1000; // 7 days in ms
     this.supabase = require('./supabase');
