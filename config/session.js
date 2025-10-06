@@ -11,7 +11,7 @@ if (shouldUsePGStore) {
     
     // Create session store with enhanced configuration
     sessionStore = new pgSession({
-      conString: process.env.SUPABASE_DB_URL + '?sslmode=require',
+      conString: process.env.SUPABASE_DB_URL,
       tableName: "session",
       createTableIfMissing: true,
       schemaName: "public",
@@ -35,6 +35,10 @@ if (shouldUsePGStore) {
         idleTimeoutMillis: 10000, // Shorter idle timeout
         createRetryIntervalMillis: 500,
         reapIntervalMillis: 2000,
+        // SSL configuration for Supabase
+        ssl: {
+          rejectUnauthorized: false // Accept Supabase's SSL certificate
+        }
       }
     });
 
