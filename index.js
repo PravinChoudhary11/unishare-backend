@@ -2,14 +2,6 @@
 require('dotenv').config(); // must be first
 const supabase = require('./config/supabase');
 
-// Debug environment variables (only log presence, not values)
-console.log('🔍 Environment check:');
-console.log('- NODE_ENV:', process.env.NODE_ENV);
-console.log('- SUPABASE_URL present:', !!process.env.SUPABASE_URL);
-console.log('- SUPABASE_DB_URL present:', !!process.env.SUPABASE_DB_URL);
-console.log('- SESSION_SECRET present:', !!process.env.SESSION_SECRET);
-console.log('- FRONTEND_URL:', process.env.FRONTEND_URL);
-
 const express = require('express');
 const cors = require('cors');
 const session = require('express-session');
@@ -119,32 +111,6 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // Session middleware
 app.use(session(sessionConfig));
 
-// Debug session store status
-if (sessionConfig.store) {
-  console.log(`${chalk.blue('ℹ')} Session store: PostgreSQL configured`);
-} else {
-  console.log(`${chalk.blue('ℹ')} Session store: Memory (default)`);
-  if (isProduction) {
-    console.warn(`${chalk.yellow('⚠')} Warning: Using memory session store in production!`);
-  }
-}
-
-// Session error monitoring middleware
-app.use((req, res, next) => {
-  // Monitor session operations
-  const originalSave = req.session.save;
-  req.session.save = function(callback) {
-    originalSave.call(this, (err) => {
-      if (err) {
-        console.error('🔴 Session save error:', err.message);
-      }
-      if (callback) callback(err);
-    });
-  };
-
-  next();
-});
-
 // Strapi-like request logger
 app.use((req, res, next) => {
   const start = process.hrtime.bigint();
@@ -180,16 +146,6 @@ app.get("/", (req, res) => {
     title: "UniShare Backend",
     accessMessage: "You have restricted access to this server.",
     userName: "Pravin" // replace dynamically if you have user data
-  });
-});
-
-// Health check endpoint for Render
-app.get("/health", (req, res) => {
-  res.status(200).json({
-    status: "healthy",
-    timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV,
-    sessionStore: sessionConfig.store ? 'postgresql' : 'memory'
   });
 });
 
@@ -278,24 +234,7 @@ app.use('*', (req, res) => {
 });
 
 // Server start
-async function startServer() {
-  // Test database connection before starting
-  if (isProduction && process.env.SUPABASE_DB_URL) {
-    const { testDatabaseConnection } = require('./utils/dbTest');
-    const dbConnected = await testDatabaseConnection();
-    
-    if (!dbConnected) {
-      console.warn(`${chalk.yellow('⚠')} Database connection failed, but continuing with memory sessions`);
-    }
-  }
-
-  app.listen(PORT, () => {
-    console.log(`${chalk.green('✓')} Server running: ${chalk.cyan(`http://localhost:${PORT}`)}`);
-    console.log(`${chalk.gray('Environment:')} ${chalk.yellow(process.env.NODE_ENV || 'development')}`);
-  });
-}
-
-startServer().catch(error => {
-  console.error('❌ Failed to start server:', error);
-  process.exit(1);
+app.listen(PORT, () => {
+  console.log(`${chalk.green('✓')} Server running: ${chalk.cyan(`http://localhost:${PORT}`)}`);
+  console.log(`${chalk.gray('Environment:')} ${chalk.yellow(process.env.NODE_ENV || 'development')}`);
 });
