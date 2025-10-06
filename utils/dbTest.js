@@ -8,8 +8,11 @@ async function testDatabaseConnection() {
   }
 
   const pool = new Pool({
-    connectionString: process.env.SUPABASE_DB_URL,
-    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+    connectionString: process.env.SUPABASE_DB_URL + '?sslmode=require',
+    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+    max: 1, // Only need 1 connection for testing
+    connectionTimeoutMillis: 10000,
+    idleTimeoutMillis: 5000
   });
 
   try {

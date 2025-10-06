@@ -120,10 +120,30 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(session(sessionConfig));
 
 // Debug session store status
-console.log(`${chalk.blue('ℹ')} Session store type: ${sessionConfig.store ? 'PostgreSQL' : 'Memory (default)'}`);
-if (isProduction && !sessionConfig.store) {
-  console.warn(`${chalk.yellow('⚠')} Warning: Using memory session store in production!`);
+if (sessionConfig.store) {
+  console.log(`${chalk.blue('ℹ')} Session store: PostgreSQL configured`);
+} else {
+  console.log(`${chalk.blue('ℹ')} Session store: Memory (default)`);
+  if (isProduction) {
+    console.warn(`${chalk.yellow('⚠')} Warning: Using memory session store in production!`);
+  }
 }
+
+// Session error monitoring middleware
+app.use((req, res, next) => {
+  // Monitor session operations
+  const originalSave = req.session.save;
+  req.session.save = function(callback) {
+    originalSave.call(this, (err) => {
+      if (err) {
+        console.error('🔴 Session save error:', err.message);
+      }
+      if (callback) callback(err);
+    });
+  };
+
+  next();
+});
 
 // Strapi-like request logger
 app.use((req, res, next) => {

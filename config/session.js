@@ -3,47 +3,59 @@ const session = require("express-session");
 const isProduction = process.env.NODE_ENV === "production";
 
 let sessionStore;
-if (isProduction && process.env.SUPABASE_DB_URL) {
+let shouldUsePGStore = isProduction && process.env.SUPABASE_DB_URL;
+
+if (shouldUsePGStore) {
   try {
     const pgSession = require("connect-pg-simple")(session);
     
+    // Create session store with enhanced configuration
     sessionStore = new pgSession({
-      conString: process.env.SUPABASE_DB_URL,
+      conString: process.env.SUPABASE_DB_URL + '?sslmode=require',
       tableName: "session",
       createTableIfMissing: true,
       schemaName: "public",
       pruneSessionInterval: 60,
-      // Enhanced error logging
+      // Enhanced error logging with fallback protection
       errorLog: (err) => {
         console.error('🔴 Session store error:', err?.message || err || 'Unknown error');
-        console.error('🔴 Full error:', err);
+        
+        // If we get too many errors, we might want to disable the store
+        if (err?.message?.includes('ECONNREFUSED') || err?.message?.includes('timeout')) {
+          console.warn('� Database connection issues detected. Sessions may not persist across restarts.');
+        }
       },
-      // Connection pool settings for Supabase
+      // Connection pool settings optimized for Supabase
       pool: {
-        max: 5,
-        min: 1,
-        acquireTimeoutMillis: 30000,
-        createTimeoutMillis: 30000,
-        destroyTimeoutMillis: 5000,
-        idleTimeoutMillis: 30000,
-        createRetryIntervalMillis: 200,
-        reapIntervalMillis: 1000,
+        max: 3, // Reduced for Render's resource limits
+        min: 0, // Allow pool to scale down to 0
+        acquireTimeoutMillis: 15000, // Reduced timeout
+        createTimeoutMillis: 15000,
+        destroyTimeoutMillis: 3000,
+        idleTimeoutMillis: 10000, // Shorter idle timeout
+        createRetryIntervalMillis: 500,
+        reapIntervalMillis: 2000,
       }
     });
 
-    // Test the connection
-    sessionStore.query('SELECT NOW()', (err, result) => {
-      if (err) {
-        console.error('🔴 Session store connection test failed:', err.message);
-        sessionStore = null; // Fall back to memory store
-      } else {
-        console.log('✅ Session store connected successfully');
-      }
-    });
+    console.log('✅ PostgreSQL session store configured');
+
+    // Handle session store events (if supported)
+    if (typeof sessionStore.on === 'function') {
+      sessionStore.on('connect', () => {
+        console.log('🟢 Session store connected successfully');
+      });
+
+      sessionStore.on('error', (err) => {
+        console.error('🔴 Session store event error:', err.message);
+      });
+    }
 
   } catch (error) {
     console.error('❌ Failed to setup PostgreSQL session store:', error.message);
+    console.warn('🟡 Falling back to memory store');
     sessionStore = null;
+    shouldUsePGStore = false;
   }
 }
 
@@ -51,10 +63,14 @@ if (isProduction && process.env.SUPABASE_DB_URL) {
 const frontendUrl = process.env.FRONTEND_URL || '';
 const isVercelFrontend = frontendUrl.includes('vercel.app') || frontendUrl.includes('https://');
 
-// If session store failed, log warning and use memory store
-if (isProduction && !sessionStore) {
-  console.warn('⚠️  PostgreSQL session store failed, falling back to memory store');
-  console.warn('⚠️  This means sessions will not persist across server restarts');
+// Log session store status
+if (shouldUsePGStore && sessionStore) {
+  console.log('📊 Session store: PostgreSQL (persistent)');
+} else {
+  console.log('📊 Session store: Memory (non-persistent)');
+  if (isProduction) {
+    console.warn('⚠️  Using memory sessions in production - sessions will not persist across restarts');
+  }
 }
 
 module.exports = {
