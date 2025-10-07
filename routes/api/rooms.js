@@ -19,34 +19,84 @@ const upload = multer({
 const validateRoomData = (req, res, next) => {
   const { title, description, rent, location, beds, move_in_date, contact_info } = req.body;
   const errors = [];
+  const isUpdate = req.method === 'PUT'; // Check if this is an update request
+
+  console.log(`🔍 Validating room data (${isUpdate ? 'UPDATE' : 'CREATE'}):`, {
+    title: title ? 'provided' : 'missing',
+    rent: rent ? 'provided' : 'missing',
+    location: location ? 'provided' : 'missing',
+    beds: beds ? 'provided' : 'missing',
+    move_in_date: move_in_date ? 'provided' : 'missing',
+    contact_info: contact_info ? 'provided' : 'missing'
+  });
 
   // Parse contact_info
   let parsedContact = {};
-  try {
-    parsedContact = typeof contact_info === 'string' ? JSON.parse(contact_info) : contact_info || {};
-  } catch {
-    return res.status(400).json({ error: 'Invalid contact_info format' });
+  if (contact_info) {
+    try {
+      parsedContact = typeof contact_info === 'string' ? JSON.parse(contact_info) : contact_info || {};
+    } catch {
+      return res.status(400).json({ error: 'Invalid contact_info format' });
+    }
   }
 
-  if (!title?.trim()) errors.push('Title is required');
-  if (description && description.length > 1000) errors.push('Description cannot exceed 1000 characters');
-  if (!rent || isNaN(rent) || parseInt(rent) <= 0) errors.push('Rent must be a positive number');
-  if (!location?.trim()) errors.push('Location is required');
-  if (!beds || isNaN(beds) || parseInt(beds) <= 0) errors.push('Number of beds must be positive');
-
-  const moveIn = new Date(move_in_date);
-  if (!move_in_date || isNaN(moveIn.getTime()) || moveIn < new Date().setHours(0,0,0,0)) {
-    errors.push('Move-in date is required and cannot be in the past');
+  // For CREATE operations, all fields are required
+  // For UPDATE operations, only validate provided fields
+  if (!isUpdate || title !== undefined) {
+    if (!title?.trim()) errors.push('Title is required');
+  }
+  
+  if (description && description.length > 1000) {
+    errors.push('Description cannot exceed 1000 characters');
+  }
+  
+  if (!isUpdate || rent !== undefined) {
+    if (!rent || isNaN(rent) || parseInt(rent) <= 0) {
+      errors.push('Rent must be a positive number');
+    }
+  }
+  
+  if (!isUpdate || location !== undefined) {
+    if (!location?.trim()) errors.push('Location is required');
+  }
+  
+  if (!isUpdate || beds !== undefined) {
+    if (!beds || isNaN(beds) || parseInt(beds) <= 0) {
+      errors.push('Number of beds must be positive');
+    }
   }
 
-  const { mobile, email, instagram } = parsedContact;
-  if (!mobile && !email && !instagram) errors.push('At least one contact method is required');
-  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.push('Invalid email format');
-  if (mobile && !/^\+?[\d\s-()]+$/.test(mobile)) errors.push('Invalid mobile format');
+  if (!isUpdate || move_in_date !== undefined) {
+    const moveIn = new Date(move_in_date);
+    if (!move_in_date || isNaN(moveIn.getTime()) || moveIn < new Date().setHours(0,0,0,0)) {
+      errors.push('Move-in date is required and cannot be in the past');
+    }
+  }
 
-  if (errors.length) return res.status(400).json({ error: 'Validation failed', details: errors });
+  // Contact info validation - only if provided
+  if (contact_info) {
+    const { mobile, email, instagram } = parsedContact;
+    if (!mobile && !email && !instagram) {
+      errors.push('At least one contact method is required');
+    }
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      errors.push('Invalid email format');
+    }
+    if (mobile && !/^\+?[\d\s-()]+$/.test(mobile)) {
+      errors.push('Invalid mobile format');
+    }
+  }
 
-  req.body.contact_info = parsedContact;
+  if (errors.length) {
+    console.log('❌ Validation failed:', errors);
+    return res.status(400).json({ error: 'Validation failed', details: errors });
+  }
+
+  if (contact_info) {
+    req.body.contact_info = parsedContact;
+  }
+  
+  console.log('✅ Validation passed');
   next();
 };
 
