@@ -185,6 +185,84 @@ const validateCustomUserId = (customUserId) => {
   return { valid: true };
 };
 
+// Helper function to validate phone number format
+const validatePhoneNumber = (phoneNumber) => {
+  if (!phoneNumber) return { valid: true }; // Phone is optional
+  
+  // Remove all non-digit characters for validation
+  const digitsOnly = phoneNumber.replace(/\D/g, '');
+  
+  // Check if it's a valid length (10-15 digits)
+  if (digitsOnly.length < 10 || digitsOnly.length > 15) {
+    return {
+      valid: false,
+      error: 'Phone number must be between 10-15 digits'
+    };
+  }
+  
+  // Check for valid characters (digits, spaces, hyphens, dots, parentheses, plus sign)
+  const validCharsRegex = /^[\+\d\s\-\.\(\)]+$/;
+  if (!validCharsRegex.test(phoneNumber.trim())) {
+    return {
+      valid: false,
+      error: 'Phone number can only contain digits, spaces, hyphens, dots, parentheses, and plus sign'
+    };
+  }
+  
+  // Ensure it starts with a digit or plus sign
+  const trimmed = phoneNumber.trim();
+  if (!/^[\+\d\(]/.test(trimmed)) {
+    return {
+      valid: false,
+      error: 'Phone number must start with a digit, plus sign, or opening parenthesis'
+    };
+  }
+  
+  return { valid: true };
+};
+
+// Helper function to validate campus name format
+const validateCampusName = (campusName) => {
+  if (!campusName) return { valid: true }; // Campus name is optional
+  
+  const trimmed = campusName.trim();
+  
+  // Check length (2-100 characters)
+  if (trimmed.length < 2 || trimmed.length > 100) {
+    return {
+      valid: false,
+      error: 'Campus name must be between 2-100 characters'
+    };
+  }
+  
+  // Check for valid characters (letters, numbers, spaces, hyphens, dots, commas, ampersands, apostrophes, parentheses)
+  const validCharsRegex = /^[a-zA-Z0-9\s\-\.\,\&'()]+$/;
+  if (!validCharsRegex.test(trimmed)) {
+    return {
+      valid: false,
+      error: 'Campus name can only contain letters, numbers, spaces, hyphens, dots, commas, ampersands, apostrophes, and parentheses'
+    };
+  }
+  
+  // Ensure it starts with a letter or number (not special characters)
+  if (!/^[a-zA-Z0-9]/.test(trimmed)) {
+    return {
+      valid: false,
+      error: 'Campus name must start with a letter or number'
+    };
+  }
+  
+  // Ensure it doesn't end with special characters (except parentheses)
+  if (!/[a-zA-Z0-9)]$/.test(trimmed)) {
+    return {
+      valid: false,
+      error: 'Campus name must end with a letter, number, or closing parenthesis'
+    };
+  }
+  
+  return { valid: true };
+};
+
 // GET /api/profile - Get current user's profile (authenticated users only)
 router.get('/', requireAuth, async (req, res) => {
   try {
@@ -214,6 +292,8 @@ router.get('/', requireAuth, async (req, res) => {
           user_id: userId,
           display_name: null,
           bio: null,
+          phone_number: null,
+          campus_name: null,
           profile_image_url: null,
           custom_user_id: null,
           created_at: null,
@@ -290,11 +370,35 @@ router.get('/:customUserId', checkRateLimit, async (req, res) => {
 router.post('/', requireAuth, requireOwnProfile, checkRateLimit, upload.single('profileImage'), async (req, res) => {
   try {
     const userId = req.userId; // Always use authenticated user's ID
-    const { display_name, bio, custom_user_id } = req.body;
+    const { display_name, bio, custom_user_id, phone_number, campus_name } = req.body;
 
     // SECURITY: Prevent any attempt to modify another user's profile
     // Even if someone tries to pass a different user_id in the body, we ignore it
     // and only use the authenticated user's ID from the session
+
+    // Validate phone number if provided
+    if (phone_number) {
+      const phoneValidation = validatePhoneNumber(phone_number);
+      if (!phoneValidation.valid) {
+        return res.status(400).json({
+          success: false,
+          message: phoneValidation.error,
+          error_code: 'INVALID_PHONE_NUMBER'
+        });
+      }
+    }
+
+    // Validate campus name if provided
+    if (campus_name) {
+      const campusValidation = validateCampusName(campus_name);
+      if (!campusValidation.valid) {
+        return res.status(400).json({
+          success: false,
+          message: campusValidation.error,
+          error_code: 'INVALID_CAMPUS_NAME'
+        });
+      }
+    }
 
     // Validate custom user ID if provided
     if (custom_user_id) {
@@ -366,6 +470,8 @@ router.post('/', requireAuth, requireOwnProfile, checkRateLimit, upload.single('
       user_id: userId,
       display_name: display_name || null,
       bio: bio || null,
+      phone_number: phone_number || null,
+      campus_name: campus_name || null,
       profile_image_url: profileImageUrl,
       custom_user_id: custom_user_id || null,
       updated_at: new Date().toISOString()
