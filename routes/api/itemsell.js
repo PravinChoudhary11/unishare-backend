@@ -105,6 +105,25 @@ const validateItemData = (data) => {
   return errors;
 };
 
+// Helper function to validate item request data
+const validateItemRequestData = (data) => {
+  const errors = [];
+
+  if (!data.message || !data.message.trim()) {
+    errors.push('Message is required');
+  }
+
+  if (data.message && data.message.length > 500) {
+    errors.push('Message cannot exceed 500 characters');
+  }
+
+  if (!data.contactMethod || !data.contactMethod.trim()) {
+    errors.push('Preferred contact method is required');
+  }
+
+  return errors;
+};
+
 // POST /api/itemsell - Create new item listing with image
 router.post('/', requireAuth, upload.single('image'), async (req, res) => {
   try {
@@ -646,6 +665,456 @@ router.use((err, req, res, next) => {
   }
   
   next(err);
+});
+
+// ============================
+// ITEM REQUEST SYSTEM
+// ============================
+
+// POST /api/itemsell/:id/request - Request to buy an item
+router.post('/:id/request', requireAuth, async (req, res) => {
+  try {
+    const itemId = req.params.id;
+    const userId = req.userId;
+    const requestData = req.body;
+    
+    console.log('🛍️ Creating item request for item:', itemId, 'by user:', userId);
+
+    // Validate request data
+    const validationErrors = validateItemRequestData(requestData);
+    if (validationErrors.length > 0) {
+      console.error('❌ Validation errors:', validationErrors);
+      return res.status(400).json({
+        success: false,
+        message: validationErrors[0],
+        errors: validationErrors
+      });
+    }
+
+    // Check if item exists and is available
+    const { data: item, error: itemError } = await supabase
+      .from('item_sell')
+      .select('user_id, title, price, category, condition, location')
+      .eq('id', itemId)
+      .single();
+
+    if (itemError || !item) {
+      console.log('❌ Item not found for request:', itemId);
+      return res.status(404).json({
+        success: false,
+        message: 'Item not found'
+      });
+    }
+
+    // Check if user is trying to request their own item
+    if (item.user_id === userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'You cannot request your own item'
+      });
+    }
+
+    // Check if user already has a request for this item
+    const { data: existingRequest } = await supabase
+      .from('item_requests')
+      .select('id, status')
+      .eq('item_id', itemId)
+      .eq('requester_id', userId)
+      .single();
+
+    if (existingRequest) {
+      return res.status(400).json({
+        success: false,
+        message: `You already have a ${existingRequest.status} request for this item`
+      });
+    }
+
+    // Create the item request
+    const dbRequestData = {
+      item_id: itemId,
+      requester_id: userId,
+      seller_id: item.user_id,
+      message: requestData.message.trim(),
+      contact_method: requestData.contactMethod.trim(),
+      offered_price: requestData.offeredPrice ? parseFloat(requestData.offeredPrice) : null,
+      pickup_preference: requestData.pickupPreference?.trim() || null,
+      status: 'pending', // pending, accepted, rejected, cancelled
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+
+    const { data: newRequest, error } = await supabase
+      .from('item_requests')
+      .insert([dbRequestData])
+      .select(`
+        *,
+        requester:requester_id (
+          id,
+          name,
+          email,
+          picture
+        ),
+        item:item_id (
+          id,
+          title,
+          price,
+          category,
+          condition
+        )
+      `)
+      .single();
+
+    if (error) {
+      console.error('❌ Database error creating item request:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to create item request',
+        details: error.message
+      });
+    }
+
+    console.log('✅ Item request created successfully:', newRequest.id);
+    res.status(201).json({
+      success: true,
+      message: 'Item request sent successfully',
+      data: newRequest
+    });
+
+  } catch (e) {
+    console.error('❌ Error creating item request:', e);
+    res.status(500).json({ 
+      success: false,
+      message: 'Failed to create item request',
+      error: e.message 
+    });
+  }
+});
+
+// GET /api/itemsell/my/requests - Get requests that users made TO MY items (requests I received as seller)
+router.get('/my/requests', requireAuth, async (req, res) => {
+  try {
+    const userId = req.userId;
+    console.log('📋 Fetching requests received on my items by user:', userId);
+
+    // First get the user's item IDs
+    const { data: userItems, error: itemsError } = await supabase
+      .from('item_sell')
+      .select('id')
+      .eq('user_id', userId);
+
+    if (itemsError) {
+      console.error('❌ Database error fetching user items:', itemsError);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to fetch your items',
+        details: itemsError.message
+      });
+    }
+
+    if (!userItems || userItems.length === 0) {
+      console.log('✅ No items found for user, returning empty requests');
+      return res.json({
+        success: true,
+        data: [],
+        message: 'No requests found (you have no items posted)'
+      });
+    }
+
+    const itemIds = userItems.map(item => item.id);
+
+    // Get all item requests for these specific items only
+    const { data: requests, error } = await supabase
+      .from('item_requests')
+      .select(`
+        *,
+        requester:requester_id (
+          id,
+          name,
+          email,
+          picture
+        ),
+        item:item_id (
+          id,
+          title,
+          price,
+          category,
+          condition,
+          location,
+          image_url,
+          user_id
+        )
+      `)
+      .in('item_id', itemIds)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('❌ Database error fetching requests on my items:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to fetch requests on your items',
+        details: error.message
+      });
+    }
+
+    // Security check: Filter out any requests that don't belong to user's items
+    const filteredRequests = (requests || []).filter(req => 
+      req.item && req.item.user_id === userId
+    );
+
+    console.log(`📊 Found ${filteredRequests.length} requests on user's items`);
+
+    res.json({
+      success: true,
+      data: filteredRequests,
+      count: filteredRequests.length
+    });
+
+  } catch (e) {
+    console.error('❌ Error fetching item requests:', e);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch item requests',
+      error: e.message
+    });
+  }
+});
+
+// GET /api/itemsell/requests/sent - Get requests that I sent (as a buyer)
+router.get('/requests/sent', requireAuth, async (req, res) => {
+  try {
+    const userId = req.userId;
+    console.log('📋 Fetching item requests sent by user:', userId);
+
+    const { data: requests, error } = await supabase
+      .from('item_requests')
+      .select(`
+        *,
+        item:item_id (
+          id,
+          title,
+          price,
+          category,
+          condition,
+          location,
+          image_url
+        ),
+        seller:seller_id (
+          id,
+          name,
+          email
+        )
+      `)
+      .eq('requester_id', userId)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('❌ Database error fetching sent requests:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to fetch your sent requests',
+        details: error.message
+      });
+    }
+
+    console.log(`📊 Found ${requests?.length || 0} requests sent by user`);
+
+    res.json({
+      success: true,
+      data: requests || [],
+      count: requests?.length || 0
+    });
+
+  } catch (e) {
+    console.error('❌ Error fetching sent item requests:', e);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch sent item requests',
+      error: e.message
+    });
+  }
+});
+
+// PUT /api/itemsell/requests/:requestId/respond - Respond to an item request (for sellers)
+router.put('/requests/:requestId/respond', requireAuth, async (req, res) => {
+  try {
+    const requestId = req.params.requestId;
+    const userId = req.userId;
+    const { status, responseMessage, agreedPrice } = req.body;
+
+    console.log('📝 Responding to item request:', requestId, 'with status:', status);
+
+    // Validate status
+    if (!['accepted', 'rejected'].includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid status. Must be "accepted" or "rejected"'
+      });
+    }
+
+    // Get the request and verify ownership
+    const { data: request, error: requestError } = await supabase
+      .from('item_requests')
+      .select(`
+        *,
+        item:item_id (
+          id,
+          title,
+          user_id
+        )
+      `)
+      .eq('id', requestId)
+      .single();
+
+    if (requestError || !request) {
+      console.log('❌ Item request not found:', requestId);
+      return res.status(404).json({
+        success: false,
+        message: 'Item request not found'
+      });
+    }
+
+    // Check if user owns the item
+    if (!request.item || request.item.user_id !== userId) {
+      return res.status(403).json({
+        success: false,
+        message: 'You can only respond to requests for your own items'
+      });
+    }
+
+    // Check if request is still pending
+    if (request.status !== 'pending') {
+      return res.status(400).json({
+        success: false,
+        message: `This request has already been ${request.status}`
+      });
+    }
+
+    // Update the request
+    const updateData = {
+      status: status,
+      response_message: responseMessage?.trim() || null,
+      agreed_price: status === 'accepted' && agreedPrice ? parseFloat(agreedPrice) : null,
+      responded_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+
+    const { data: updatedRequest, error: updateError } = await supabase
+      .from('item_requests')
+      .update(updateData)
+      .eq('id', requestId)
+      .select(`
+        *,
+        requester:requester_id (
+          id,
+          name,
+          email
+        ),
+        item:item_id (
+          id,
+          title,
+          price,
+          category
+        )
+      `)
+      .single();
+
+    if (updateError) {
+      console.error('❌ Database error updating item request:', updateError);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to update item request',
+        details: updateError.message
+      });
+    }
+
+    console.log(`✅ Item request ${status} successfully`);
+    res.json({
+      success: true,
+      message: `Item request ${status} successfully`,
+      data: updatedRequest
+    });
+
+  } catch (e) {
+    console.error('❌ Error responding to item request:', e);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to respond to item request',
+      error: e.message
+    });
+  }
+});
+
+// DELETE /api/itemsell/requests/:requestId - Cancel an item request (for buyers)
+router.delete('/requests/:requestId', requireAuth, async (req, res) => {
+  try {
+    const requestId = req.params.requestId;
+    const userId = req.userId;
+
+    console.log('🗑️ Cancelling item request:', requestId, 'by user:', userId);
+
+    // Get the request and verify ownership
+    const { data: request, error: requestError } = await supabase
+      .from('item_requests')
+      .select('id, requester_id, status')
+      .eq('id', requestId)
+      .single();
+
+    if (requestError || !request) {
+      console.log('❌ Item request not found:', requestId);
+      return res.status(404).json({
+        success: false,
+        message: 'Item request not found'
+      });
+    }
+
+    // Check if user is the requester
+    if (request.requester_id !== userId) {
+      return res.status(403).json({
+        success: false,
+        message: 'You can only cancel your own requests'
+      });
+    }
+
+    // Check if request can be cancelled
+    if (request.status === 'accepted') {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot cancel an accepted request. Please contact the seller.'
+      });
+    }
+
+    // Update status to cancelled instead of deleting
+    const { error: updateError } = await supabase
+      .from('item_requests')
+      .update({ 
+        status: 'cancelled',
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', requestId);
+
+    if (updateError) {
+      console.error('❌ Database error cancelling item request:', updateError);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to cancel item request',
+        details: updateError.message
+      });
+    }
+
+    console.log('✅ Item request cancelled successfully');
+    res.json({
+      success: true,
+      message: 'Item request cancelled successfully'
+    });
+
+  } catch (e) {
+    console.error('❌ Error cancelling item request:', e);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to cancel item request',
+      error: e.message
+    });
+  }
 });
 
 module.exports = router;

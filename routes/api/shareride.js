@@ -368,6 +368,13 @@ router.get('/my/requested', requireAuth, async (req, res) => {
   }
 });
 
+// GET /api/shareride/requests/sent - Alias for /my/requested (for consistency with other modules)
+router.get('/requests/sent', requireAuth, async (req, res) => {
+  // Redirect to the existing /my/requested endpoint
+  req.url = '/my/requested';
+  return router.handle(req, res);
+});
+
 // POST /api/shareride/create - Create new ride posting
 router.post('/create', requireAuth, async (req, res) => {
   try {
@@ -775,7 +782,9 @@ router.put('/requests/:requestId/respond', requireAuth, async (req, res) => {
           id,
           user_id,
           seats,
-          available_seats
+          available_seats,
+          date,
+          time
         )
       `)
       .eq('id', requestId)
@@ -797,6 +806,19 @@ router.put('/requests/:requestId/respond', requireAuth, async (req, res) => {
       });
     }
 
+    // Check if the ride is in the past
+    const now = new Date();
+    const rideDateTime = new Date(`${request.ride.date}T${request.ride.time}`);
+    
+    if (rideDateTime < now) {
+      console.log('⚠️ Attempting to respond to request for past ride:', request.ride.date, request.ride.time);
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot respond to requests for rides that have already passed',
+        details: `Ride was scheduled for ${request.ride.date} at ${request.ride.time}`
+      });
+    }
+
     // Check if request is still pending
     if (request.status !== 'pending') {
       return res.status(400).json({
@@ -814,7 +836,7 @@ router.put('/requests/:requestId/respond', requireAuth, async (req, res) => {
 
     // If confirming, check if enough seats are available
     if (action === 'confirm') {
-      if (request.ride.available_seats < request.seats_requested) {
+      if (request.seats_requested && request.ride.available_seats < request.seats_requested) {
         return res.status(400).json({
           success: false,
           message: 'Not enough seats available for this request'
@@ -822,14 +844,26 @@ router.put('/requests/:requestId/respond', requireAuth, async (req, res) => {
       }
 
       // Update available seats in the ride
-      const newAvailableSeats = request.ride.available_seats - request.seats_requested;
-      await supabase
+      // Note: Only update available_seats, avoid updating updated_at for past rides
+      const seatsToReduce = request.seats_requested || 1;
+      const newAvailableSeats = request.ride.available_seats - seatsToReduce;
+      
+      const { error: rideUpdateError } = await supabase
         .from('shared_rides')
         .update({ 
-          available_seats: newAvailableSeats,
-          updated_at: new Date().toISOString()
+          available_seats: newAvailableSeats
+          // Don't update updated_at to avoid triggering future_ride_check constraint
         })
         .eq('id', request.ride_id);
+
+      if (rideUpdateError) {
+        console.error('❌ Error updating ride seats:', rideUpdateError);
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to update ride seats',
+          details: rideUpdateError.message
+        });
+      }
     }
 
     // Update the request
@@ -1339,6 +1373,79 @@ router.get('/stats', requireAuth, async (req, res) => {
       success: false,
       message: 'Internal server error',
       details: error.message
+    });
+  }
+});
+
+// DELETE /api/shareride/requests/:requestId - Cancel a ride request (for passengers)
+router.delete('/requests/:requestId', requireAuth, async (req, res) => {
+  try {
+    const requestId = req.params.requestId;
+    const userId = req.userId;
+
+    console.log('🗑️ Cancelling ride request:', requestId, 'by user:', userId);
+
+    // Get the request and verify ownership
+    const { data: request, error: requestError } = await supabase
+      .from('ride_requests')
+      .select('id, requester_id, status')
+      .eq('id', requestId)
+      .single();
+
+    if (requestError || !request) {
+      console.log('❌ Ride request not found:', requestId);
+      return res.status(404).json({
+        success: false,
+        message: 'Ride request not found'
+      });
+    }
+
+    // Check if user is the requester
+    if (request.requester_id !== userId) {
+      return res.status(403).json({
+        success: false,
+        message: 'You can only cancel your own requests'
+      });
+    }
+
+    // Check if request can be cancelled
+    if (request.status === 'confirmed') {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot cancel a confirmed request. Please contact the driver.'
+      });
+    }
+
+    // Update status to cancelled instead of deleting
+    const { error: updateError } = await supabase
+      .from('ride_requests')
+      .update({ 
+        status: 'cancelled',
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', requestId);
+
+    if (updateError) {
+      console.error('❌ Database error cancelling ride request:', updateError);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to cancel ride request',
+        details: updateError.message
+      });
+    }
+
+    console.log('✅ Ride request cancelled successfully');
+    res.json({
+      success: true,
+      message: 'Ride request cancelled successfully'
+    });
+
+  } catch (e) {
+    console.error('❌ Error cancelling ride request:', e);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to cancel ride request',
+      error: e.message
     });
   }
 });

@@ -17,6 +17,43 @@ const formatContactInfo = (contacts) => {
   return contactInfo;
 };
 
+// Helper function to validate ticket request data
+const validateTicketRequestData = (data) => {
+  const errors = [];
+
+  if (!data.message || !data.message.trim()) {
+    errors.push('Message is required');
+  } else if (data.message.trim().length < 10) {
+    errors.push('Message must be at least 10 characters long');
+  } else if (data.message.trim().length > 1000) {
+    errors.push('Message must be less than 1000 characters');
+  }
+
+  if (!data.contactMethod || !data.contactMethod.trim()) {
+    errors.push('Contact method is required');
+  } else if (data.contactMethod.trim().length > 500) {
+    errors.push('Contact method must be less than 500 characters');
+  }
+
+  if (!data.quantityRequested || isNaN(data.quantityRequested) || parseInt(data.quantityRequested) <= 0) {
+    errors.push('Valid quantity requested is required');
+  } else if (parseInt(data.quantityRequested) > 20) {
+    errors.push('Cannot request more than 20 tickets at once');
+  }
+
+  // Optional validation for offered price
+  if (data.offeredPrice && (isNaN(data.offeredPrice) || parseFloat(data.offeredPrice) < 0)) {
+    errors.push('Offered price must be a valid positive number');
+  }
+
+  // Optional validation for pickup preference
+  if (data.pickupPreference && data.pickupPreference.trim().length > 500) {
+    errors.push('Pickup preference must be less than 500 characters');
+  }
+
+  return errors;
+};
+
 // Helper function to validate ticket data
 const validateTicketData = (data) => {
   const errors = [];
@@ -741,6 +778,496 @@ router.get('/stats', requireAuth, async (req, res) => {
   }
 });
 
+// ============================
+// TICKET REQUEST SYSTEM
+// ============================
+
+// POST /api/tickets/:id/request - Request to buy tickets
+router.post('/:id/request', requireAuth, async (req, res) => {
+  try {
+    const ticketId = req.params.id;
+    const userId = req.userId;
+    const requestData = req.body;
+    
+    console.log('🎫 Creating ticket request for ticket:', ticketId, 'by user:', userId);
+
+    // Validate request data
+    const validationErrors = validateTicketRequestData(requestData);
+    if (validationErrors.length > 0) {
+      console.error('❌ Validation errors:', validationErrors);
+      return res.status(400).json({
+        success: false,
+        message: validationErrors[0],
+        errors: validationErrors
+      });
+    }
+
+    // Check if ticket exists and is available
+    const { data: ticket, error: ticketError } = await supabase
+      .from('tickets')
+      .select('user_id, title, price, quantity_available, category, venue, location')
+      .eq('id', ticketId)
+      .single();
+
+    if (ticketError || !ticket) {
+      console.log('❌ Ticket not found for request:', ticketId);
+      return res.status(404).json({
+        success: false,
+        message: 'Ticket not found'
+      });
+    }
+
+    // Check if user is trying to request their own ticket
+    if (ticket.user_id === userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'You cannot request your own tickets'
+      });
+    }
+
+    // Check if requested quantity is available
+    const quantityRequested = parseInt(requestData.quantityRequested);
+    if (quantityRequested > ticket.quantity_available) {
+      return res.status(400).json({
+        success: false,
+        message: `Only ${ticket.quantity_available} tickets available, but you requested ${quantityRequested}`
+      });
+    }
+
+    // Check if user already has a request for this ticket
+    const { data: existingRequest } = await supabase
+      .from('ticket_requests')
+      .select('id, status')
+      .eq('ticket_id', ticketId)
+      .eq('requester_id', userId)
+      .single();
+
+    if (existingRequest) {
+      return res.status(400).json({
+        success: false,
+        message: `You already have a ${existingRequest.status} request for this ticket`
+      });
+    }
+
+    // Create the ticket request
+    const dbRequestData = {
+      ticket_id: ticketId,
+      requester_id: userId,
+      seller_id: ticket.user_id,
+      message: requestData.message.trim(),
+      contact_method: requestData.contactMethod.trim(),
+      quantity_requested: quantityRequested,
+      offered_price: requestData.offeredPrice ? parseFloat(requestData.offeredPrice) : null,
+      pickup_preference: requestData.pickupPreference?.trim() || null,
+      status: 'pending', // pending, accepted, rejected, cancelled
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+
+    const { data: newRequest, error } = await supabase
+      .from('ticket_requests')
+      .insert([dbRequestData])
+      .select(`
+        *,
+        requester:requester_id (
+          id,
+          name,
+          email,
+          picture
+        ),
+        ticket:ticket_id (
+          id,
+          title,
+          price,
+          category,
+          venue,
+          location
+        )
+      `)
+      .single();
+
+    if (error) {
+      console.error('❌ Database error creating ticket request:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to create ticket request',
+        details: error.message
+      });
+    }
+
+    console.log('✅ Ticket request created successfully:', newRequest.id);
+    res.status(201).json({
+      success: true,
+      message: 'Ticket request sent successfully',
+      data: newRequest
+    });
+
+  } catch (e) {
+    console.error('❌ Error creating ticket request:', e);
+    res.status(500).json({ 
+      success: false,
+      message: 'Failed to create ticket request',
+      error: e.message 
+    });
+  }
+});
+
+// GET /api/tickets/my/requests - Get requests that users made TO MY tickets (requests I received as seller)
+router.get('/my/requests', requireAuth, async (req, res) => {
+  try {
+    const userId = req.userId;
+    console.log('📋 Fetching requests received on my tickets by user:', userId);
+
+    // First get the user's ticket IDs
+    const { data: userTickets, error: ticketsError } = await supabase
+      .from('tickets')
+      .select('id')
+      .eq('user_id', userId);
+
+    if (ticketsError) {
+      console.error('❌ Database error fetching user tickets:', ticketsError);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to fetch your tickets',
+        details: ticketsError.message
+      });
+    }
+
+    if (!userTickets || userTickets.length === 0) {
+      console.log('✅ No tickets found for user, returning empty requests');
+      return res.json({
+        success: true,
+        data: [],
+        message: 'No requests found (you have no tickets posted)'
+      });
+    }
+
+    const ticketIds = userTickets.map(ticket => ticket.id);
+
+    // Get all ticket requests for these specific tickets only
+    const { data: requests, error } = await supabase
+      .from('ticket_requests')
+      .select(`
+        *,
+        requester:requester_id (
+          id,
+          name,
+          email,
+          picture
+        ),
+        ticket:ticket_id (
+          id,
+          title,
+          price,
+          category,
+          venue,
+          location,
+          quantity_available,
+          user_id
+        )
+      `)
+      .in('ticket_id', ticketIds)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('❌ Database error fetching requests on my tickets:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to fetch requests on your tickets',
+        details: error.message
+      });
+    }
+
+    // Security check: Filter out any requests that don't belong to user's tickets
+    const filteredRequests = (requests || []).filter(req => 
+      req.ticket && req.ticket.user_id === userId
+    );
+
+    console.log(`📊 Found ${filteredRequests.length} requests on user's tickets`);
+
+    res.json({
+      success: true,
+      data: filteredRequests,
+      count: filteredRequests.length
+    });
+
+  } catch (e) {
+    console.error('❌ Error fetching ticket requests:', e);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch ticket requests',
+      error: e.message
+    });
+  }
+});
+
+// GET /api/tickets/requests/sent - Get requests that I sent (as a buyer)
+router.get('/requests/sent', requireAuth, async (req, res) => {
+  try {
+    const userId = req.userId;
+    console.log('📋 Fetching ticket requests sent by user:', userId);
+
+    const { data: requests, error } = await supabase
+      .from('ticket_requests')
+      .select(`
+        *,
+        ticket:ticket_id (
+          id,
+          title,
+          price,
+          category,
+          venue,
+          location,
+          quantity_available
+        ),
+        seller:seller_id (
+          id,
+          name,
+          email
+        )
+      `)
+      .eq('requester_id', userId)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('❌ Database error fetching sent requests:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to fetch your sent requests',
+        details: error.message
+      });
+    }
+
+    console.log(`📊 Found ${requests?.length || 0} requests sent by user`);
+
+    res.json({
+      success: true,
+      data: requests || [],
+      count: requests?.length || 0
+    });
+
+  } catch (e) {
+    console.error('❌ Error fetching sent ticket requests:', e);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch sent ticket requests',
+      error: e.message
+    });
+  }
+});
+
+// PUT /api/tickets/requests/:requestId/respond - Respond to a ticket request (for sellers)
+router.put('/requests/:requestId/respond', requireAuth, async (req, res) => {
+  try {
+    const requestId = req.params.requestId;
+    const userId = req.userId;
+    const { status, responseMessage, agreedPrice, agreedQuantity } = req.body;
+
+    console.log('📝 Responding to ticket request:', requestId, 'with status:', status);
+
+    // Validate status
+    if (!['accepted', 'rejected'].includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid status. Must be "accepted" or "rejected"'
+      });
+    }
+
+    // Get the request and verify ownership
+    const { data: request, error: requestError } = await supabase
+      .from('ticket_requests')
+      .select(`
+        *,
+        ticket:ticket_id (
+          id,
+          title,
+          user_id,
+          quantity_available
+        )
+      `)
+      .eq('id', requestId)
+      .single();
+
+    if (requestError || !request) {
+      console.log('❌ Ticket request not found:', requestId);
+      return res.status(404).json({
+        success: false,
+        message: 'Ticket request not found'
+      });
+    }
+
+    // Check if user owns the ticket
+    if (!request.ticket || request.ticket.user_id !== userId) {
+      return res.status(403).json({
+        success: false,
+        message: 'You can only respond to requests for your own tickets'
+      });
+    }
+
+    // Check if request is still pending
+    if (request.status !== 'pending') {
+      return res.status(400).json({
+        success: false,
+        message: `This request has already been ${request.status}`
+      });
+    }
+
+    // If accepting, validate agreed quantity against availability
+    if (status === 'accepted') {
+      const finalQuantity = agreedQuantity ? parseInt(agreedQuantity) : request.quantity_requested;
+      if (finalQuantity > request.ticket.quantity_available) {
+        return res.status(400).json({
+          success: false,
+          message: `Cannot accept ${finalQuantity} tickets. Only ${request.ticket.quantity_available} available.`
+        });
+      }
+    }
+
+    // Update the request
+    const updateData = {
+      status: status,
+      response_message: responseMessage?.trim() || null,
+      agreed_price: status === 'accepted' && agreedPrice ? parseFloat(agreedPrice) : null,
+      agreed_quantity: status === 'accepted' && agreedQuantity ? parseInt(agreedQuantity) : request.quantity_requested,
+      responded_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+
+    const { data: updatedRequest, error: updateError } = await supabase
+      .from('ticket_requests')
+      .update(updateData)
+      .eq('id', requestId)
+      .select(`
+        *,
+        requester:requester_id (
+          id,
+          name,
+          email
+        ),
+        ticket:ticket_id (
+          id,
+          title,
+          price,
+          category
+        )
+      `)
+      .single();
+
+    if (updateError) {
+      console.error('❌ Database error updating ticket request:', updateError);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to update ticket request',
+        details: updateError.message
+      });
+    }
+
+    // If accepted, reduce the available quantity
+    if (status === 'accepted') {
+      const soldQuantity = updateData.agreed_quantity;
+      const { error: ticketUpdateError } = await supabase
+        .from('tickets')
+        .update({ 
+          quantity_available: request.ticket.quantity_available - soldQuantity,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', request.ticket_id);
+
+      if (ticketUpdateError) {
+        console.error('❌ Error updating ticket quantity:', ticketUpdateError);
+        // Don't fail the request response, just log the error
+      }
+    }
+
+    console.log(`✅ Ticket request ${status} successfully`);
+    res.json({
+      success: true,
+      message: `Ticket request ${status} successfully`,
+      data: updatedRequest
+    });
+
+  } catch (e) {
+    console.error('❌ Error responding to ticket request:', e);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to respond to ticket request',
+      error: e.message
+    });
+  }
+});
+
+// DELETE /api/tickets/requests/:requestId - Cancel a ticket request (for buyers)
+router.delete('/requests/:requestId', requireAuth, async (req, res) => {
+  try {
+    const requestId = req.params.requestId;
+    const userId = req.userId;
+
+    console.log('🗑️ Cancelling ticket request:', requestId, 'by user:', userId);
+
+    // Get the request and verify ownership
+    const { data: request, error: requestError } = await supabase
+      .from('ticket_requests')
+      .select('id, requester_id, status')
+      .eq('id', requestId)
+      .single();
+
+    if (requestError || !request) {
+      console.log('❌ Ticket request not found:', requestId);
+      return res.status(404).json({
+        success: false,
+        message: 'Ticket request not found'
+      });
+    }
+
+    // Check if user is the requester
+    if (request.requester_id !== userId) {
+      return res.status(403).json({
+        success: false,
+        message: 'You can only cancel your own requests'
+      });
+    }
+
+    // Check if request can be cancelled
+    if (request.status === 'accepted') {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot cancel an accepted request. Please contact the seller.'
+      });
+    }
+
+    // Update status to cancelled instead of deleting
+    const { error: updateError } = await supabase
+      .from('ticket_requests')
+      .update({ 
+        status: 'cancelled',
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', requestId);
+
+    if (updateError) {
+      console.error('❌ Database error cancelling ticket request:', updateError);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to cancel ticket request',
+        details: updateError.message
+      });
+    }
+
+    console.log('✅ Ticket request cancelled successfully');
+    res.json({
+      success: true,
+      message: 'Ticket request cancelled successfully'
+    });
+
+  } catch (e) {
+    console.error('❌ Error cancelling ticket request:', e);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to cancel ticket request',
+      error: e.message
+    });
+  }
+});
 
 
 module.exports = router;

@@ -40,6 +40,32 @@ const formatContactInfo = (contacts) => {
   return contactInfo;
 };
 
+// Helper function to validate lost/found request data
+const validateFoundItemRequestData = (data) => {
+  const errors = [];
+
+  if (!data.message || !data.message.trim()) {
+    errors.push('Message is required');
+  } else if (data.message.trim().length < 10) {
+    errors.push('Message must be at least 10 characters long');
+  } else if (data.message.trim().length > 1000) {
+    errors.push('Message must be less than 1000 characters');
+  }
+
+  if (!data.contactMethod || !data.contactMethod.trim()) {
+    errors.push('Contact method is required');
+  } else if (data.contactMethod.trim().length > 500) {
+    errors.push('Contact method must be less than 500 characters');
+  }
+
+  // Optional validation for proof description
+  if (data.proofDescription && data.proofDescription.trim().length > 1000) {
+    errors.push('Proof description must be less than 1000 characters');
+  }
+
+  return errors;
+};
+
 // Helper function to validate lost/found item data
 const validateItemData = (data) => {
   const errors = [];
@@ -792,6 +818,483 @@ router.use((err, req, res, next) => {
   }
   
   next(err);
+});
+
+// ============================
+// LOST & FOUND REQUEST SYSTEM
+// ============================
+
+// POST /api/lostfound/:id/request - Claim a found item or report seeing a lost item
+router.post('/:id/request', requireAuth, async (req, res) => {
+  try {
+    const itemId = req.params.id;
+    const userId = req.userId;
+    const requestData = req.body;
+    
+    console.log('🔍 Creating lost/found request for item:', itemId, 'by user:', userId);
+
+    // Validate request data
+    const validationErrors = validateFoundItemRequestData(requestData);
+    if (validationErrors.length > 0) {
+      console.error('❌ Validation errors:', validationErrors);
+      return res.status(400).json({
+        success: false,
+        message: validationErrors[0],
+        errors: validationErrors
+      });
+    }
+
+    // Check if item exists
+    const { data: item, error: itemError } = await supabase
+      .from('lost_found_items')
+      .select('user_id, item_name, mode, status, description')
+      .eq('id', itemId)
+      .single();
+
+    if (itemError || !item) {
+      console.log('❌ Lost/found item not found for request:', itemId);
+      return res.status(404).json({
+        success: false,
+        message: 'Lost/found item not found'
+      });
+    }
+
+    // Check if user is trying to request their own item
+    if (item.user_id === userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'You cannot request your own lost/found item'
+      });
+    }
+
+    // Check if item is still active
+    if (item.status !== 'active') {
+      return res.status(400).json({
+        success: false,
+        message: `This ${item.mode} item is no longer active`
+      });
+    }
+
+    // Check if user already has a request for this item
+    const { data: existingRequest } = await supabase
+      .from('lostfound_requests')
+      .select('id, status')
+      .eq('item_id', itemId)
+      .eq('requester_id', userId)
+      .single();
+
+    if (existingRequest) {
+      return res.status(400).json({
+        success: false,
+        message: `You already have a ${existingRequest.status} request for this ${item.mode} item`
+      });
+    }
+
+    // Create the lost/found request
+    const dbRequestData = {
+      item_id: itemId,
+      requester_id: userId,
+      owner_id: item.user_id,
+      message: requestData.message.trim(),
+      contact_method: requestData.contactMethod.trim(),
+      proof_description: requestData.proofDescription?.trim() || null,
+      status: 'pending', // pending, accepted, rejected, cancelled
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+
+    const { data: newRequest, error } = await supabase
+      .from('lostfound_requests')
+      .insert([dbRequestData])
+      .select(`
+        *,
+        requester:requester_id (
+          id,
+          name,
+          email,
+          picture
+        ),
+        item:item_id (
+          id,
+          item_name,
+          mode,
+          status,
+          description
+        )
+      `)
+      .single();
+
+    if (error) {
+      console.error('❌ Database error creating lost/found request:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to create lost/found request',
+        details: error.message
+      });
+    }
+
+    console.log('✅ Lost/found request created successfully:', newRequest.id);
+    res.status(201).json({
+      success: true,
+      message: `${item.mode === 'lost' ? 'Sighting report' : 'Claim request'} sent successfully`,
+      data: newRequest
+    });
+
+  } catch (e) {
+    console.error('❌ Error creating lost/found request:', e);
+    res.status(500).json({ 
+      success: false,
+      message: 'Failed to create lost/found request',
+      error: e.message 
+    });
+  }
+});
+
+// GET /api/lostfound/my/requests - Get requests that users made TO MY items (requests I received as owner)
+router.get('/my/requests', requireAuth, async (req, res) => {
+  try {
+    const userId = req.userId;
+    console.log('📋 Fetching requests received on my lost/found items by user:', userId);
+
+    // First get the user's item IDs
+    const { data: userItems, error: itemsError } = await supabase
+      .from('lost_found_items')
+      .select('id')
+      .eq('user_id', userId);
+
+    if (itemsError) {
+      console.error('❌ Database error fetching user items:', itemsError);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to fetch your items',
+        details: itemsError.message
+      });
+    }
+
+    if (!userItems || userItems.length === 0) {
+      console.log('✅ No items found for user, returning empty requests');
+      return res.json({
+        success: true,
+        data: [],
+        message: 'No requests found (you have no lost/found items posted)'
+      });
+    }
+
+    const itemIds = userItems.map(item => item.id);
+
+    // Get all requests for these specific items only
+    const { data: requests, error } = await supabase
+      .from('lostfound_requests')
+      .select(`
+        *,
+        requester:requester_id (
+          id,
+          name,
+          email,
+          picture
+        ),
+        item:item_id (
+          id,
+          item_name,
+          mode,
+          status,
+          description,
+          where_last_seen,
+          where_found,
+          date_lost,
+          date_found,
+          user_id,
+          image_urls
+        )
+      `)
+      .in('item_id', itemIds)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('❌ Database error fetching requests on my items:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to fetch requests on your items',
+        details: error.message
+      });
+    }
+
+    // Security check: Filter out any requests that don't belong to user's items
+    const filteredRequests = (requests || []).filter(req => 
+      req.item && req.item.user_id === userId
+    );
+
+    console.log(`📊 Found ${filteredRequests.length} requests on user's lost/found items`);
+
+    res.json({
+      success: true,
+      data: filteredRequests,
+      count: filteredRequests.length
+    });
+
+  } catch (e) {
+    console.error('❌ Error fetching lost/found requests:', e);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch lost/found requests',
+      error: e.message
+    });
+  }
+});
+
+// GET /api/lostfound/requests/sent - Get requests that I sent (as a claimant/reporter)
+router.get('/requests/sent', requireAuth, async (req, res) => {
+  try {
+    const userId = req.userId;
+    console.log('📋 Fetching lost/found requests sent by user:', userId);
+
+    const { data: requests, error } = await supabase
+      .from('lostfound_requests')
+      .select(`
+        *,
+        item:item_id (
+          id,
+          item_name,
+          mode,
+          status,
+          description,
+          where_last_seen,
+          where_found,
+          image_urls
+        ),
+        owner:owner_id (
+          id,
+          name,
+          email
+        )
+      `)
+      .eq('requester_id', userId)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('❌ Database error fetching sent requests:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to fetch your sent requests',
+        details: error.message
+      });
+    }
+
+    console.log(`📊 Found ${requests?.length || 0} requests sent by user`);
+
+    res.json({
+      success: true,
+      data: requests || [],
+      count: requests?.length || 0
+    });
+
+  } catch (e) {
+    console.error('❌ Error fetching sent lost/found requests:', e);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch sent lost/found requests',
+      error: e.message
+    });
+  }
+});
+
+// PUT /api/lostfound/requests/:requestId/respond - Respond to a lost/found request (for owners)
+router.put('/requests/:requestId/respond', requireAuth, async (req, res) => {
+  try {
+    const requestId = req.params.requestId;
+    const userId = req.userId;
+    const { status, responseMessage } = req.body;
+
+    console.log('📝 Responding to lost/found request:', requestId, 'with status:', status);
+
+    // Validate status
+    if (!['accepted', 'rejected'].includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid status. Must be "accepted" or "rejected"'
+      });
+    }
+
+    // Get the request and verify ownership
+    const { data: request, error: requestError } = await supabase
+      .from('lostfound_requests')
+      .select(`
+        *,
+        item:item_id (
+          id,
+          item_name,
+          mode,
+          user_id
+        )
+      `)
+      .eq('id', requestId)
+      .single();
+
+    if (requestError || !request) {
+      console.log('❌ Lost/found request not found:', requestId);
+      return res.status(404).json({
+        success: false,
+        message: 'Lost/found request not found'
+      });
+    }
+
+    // Check if user owns the item
+    if (!request.item || request.item.user_id !== userId) {
+      return res.status(403).json({
+        success: false,
+        message: 'You can only respond to requests for your own items'
+      });
+    }
+
+    // Check if request is still pending
+    if (request.status !== 'pending') {
+      return res.status(400).json({
+        success: false,
+        message: `This request has already been ${request.status}`
+      });
+    }
+
+    // Update the request
+    const updateData = {
+      status: status,
+      response_message: responseMessage?.trim() || null,
+      responded_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+
+    const { data: updatedRequest, error: updateError } = await supabase
+      .from('lostfound_requests')
+      .update(updateData)
+      .eq('id', requestId)
+      .select(`
+        *,
+        requester:requester_id (
+          id,
+          name,
+          email
+        ),
+        item:item_id (
+          id,
+          item_name,
+          mode,
+          description
+        )
+      `)
+      .single();
+
+    if (updateError) {
+      console.error('❌ Database error updating lost/found request:', updateError);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to update lost/found request',
+        details: updateError.message
+      });
+    }
+
+    // If accepted, update the item status to resolved
+    if (status === 'accepted') {
+      const { error: itemUpdateError } = await supabase
+        .from('lost_found_items')
+        .update({ 
+          status: 'resolved',
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', request.item_id);
+
+      if (itemUpdateError) {
+        console.error('❌ Error updating item status to resolved:', itemUpdateError);
+        // Don't fail the request response, just log the error
+      }
+    }
+
+    console.log(`✅ Lost/found request ${status} successfully`);
+    res.json({
+      success: true,
+      message: `${request.item.mode === 'lost' ? 'Sighting report' : 'Claim request'} ${status} successfully`,
+      data: updatedRequest
+    });
+
+  } catch (e) {
+    console.error('❌ Error responding to lost/found request:', e);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to respond to lost/found request',
+      error: e.message
+    });
+  }
+});
+
+// DELETE /api/lostfound/requests/:requestId - Cancel a lost/found request (for claimants/reporters)
+router.delete('/requests/:requestId', requireAuth, async (req, res) => {
+  try {
+    const requestId = req.params.requestId;
+    const userId = req.userId;
+
+    console.log('🗑️ Cancelling lost/found request:', requestId, 'by user:', userId);
+
+    // Get the request and verify ownership
+    const { data: request, error: requestError } = await supabase
+      .from('lostfound_requests')
+      .select('id, requester_id, status, item:item_id(mode)')
+      .eq('id', requestId)
+      .single();
+
+    if (requestError || !request) {
+      console.log('❌ Lost/found request not found:', requestId);
+      return res.status(404).json({
+        success: false,
+        message: 'Lost/found request not found'
+      });
+    }
+
+    // Check if user is the requester
+    if (request.requester_id !== userId) {
+      return res.status(403).json({
+        success: false,
+        message: 'You can only cancel your own requests'
+      });
+    }
+
+    // Check if request can be cancelled
+    if (request.status === 'accepted') {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot cancel an accepted request. Please contact the item owner.'
+      });
+    }
+
+    // Update status to cancelled instead of deleting
+    const { error: updateError } = await supabase
+      .from('lostfound_requests')
+      .update({ 
+        status: 'cancelled',
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', requestId);
+
+    if (updateError) {
+      console.error('❌ Database error cancelling lost/found request:', updateError);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to cancel lost/found request',
+        details: updateError.message
+      });
+    }
+
+    console.log('✅ Lost/found request cancelled successfully');
+    res.json({
+      success: true,
+      message: `${request.item?.mode === 'lost' ? 'Sighting report' : 'Claim request'} cancelled successfully`
+    });
+
+  } catch (e) {
+    console.error('❌ Error cancelling lost/found request:', e);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to cancel lost/found request',
+      error: e.message
+    });
+  }
 });
 
 module.exports = router;

@@ -11,6 +11,9 @@ const passport = require('./config/passport');
 const chalk = require('chalk');
 const engine = require('ejs-mate');
 
+// Import cleanup service
+const cleanupService = require('./services/cleanup');
+
 // Route imports - Core system routes
 const authRoutes = require('./routes/auth'); // Authentication routes (login, logout, register)
 const adminRoutes = require('./routes/admin'); // Admin dashboard routes
@@ -237,4 +240,20 @@ app.use('*', (req, res) => {
 app.listen(PORT, () => {
   console.log(`${chalk.green('✓')} Server running: ${chalk.cyan(`http://localhost:${PORT}`)}`);
   console.log(`${chalk.gray('Environment:')} ${chalk.yellow(process.env.NODE_ENV || 'development')}`);
+  
+  // Start cleanup service
+  cleanupService.start();
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('🛑 SIGTERM received, shutting down gracefully...');
+  cleanupService.stop();
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  console.log('🛑 SIGINT received, shutting down gracefully...');
+  cleanupService.stop();
+  process.exit(0);
 });

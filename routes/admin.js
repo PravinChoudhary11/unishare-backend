@@ -713,4 +713,50 @@ const formatTimeAgo = (dateString) => {
   return date.toLocaleDateString();
 };
 
+// Admin route - Cleanup service management
+router.get('/cleanup/status', async (req, res) => {
+  try {
+    const cleanupService = require('../services/cleanup');
+    const status = cleanupService.getStatus();
+    
+    res.json({
+      success: true,
+      data: status,
+      message: `Cleanup service is ${status.isRunning ? 'running' : 'stopped'}`
+    });
+  } catch (error) {
+    console.error('❌ Error getting cleanup status:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get cleanup status',
+      details: error.message
+    });
+  }
+});
+
+// Admin route - Manual cleanup trigger
+router.post('/cleanup/run', async (req, res) => {
+  try {
+    console.log('🧹 Admin triggered manual cleanup by:', req.user.email);
+    const cleanupService = require('../services/cleanup');
+    
+    // Run cleanup in background
+    cleanupService.runManualCleanup().catch(error => {
+      console.error('❌ Manual cleanup failed:', error);
+    });
+    
+    res.json({
+      success: true,
+      message: 'Cleanup task started in background'
+    });
+  } catch (error) {
+    console.error('❌ Error triggering manual cleanup:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to trigger cleanup',
+      details: error.message
+    });
+  }
+});
+
 module.exports = router;
