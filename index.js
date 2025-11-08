@@ -143,13 +143,11 @@ app.use((req, res, next) => {
 app.use(passport.initialize());
 app.use(passport.session());
 
-// Root route
+// Root route - Redirect to frontend
 app.get("/", (req, res) => {
-  res.render("index", { 
-    title: "UniShare Backend",
-    accessMessage: "You have restricted access to this server.",
-    userName: "Pravin" // replace dynamically if you have user data
-  });
+  // Redirect to frontend URL
+  const frontendUrl = process.env.FRONTEND_URL_PROD || process.env.FRONTEND_URL || 'https://unishare-eight.vercel.app';
+  res.redirect(frontendUrl);
 });
 
 
